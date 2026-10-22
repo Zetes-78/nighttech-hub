@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, options %}
+{% block title %}Mailing list{% endblock %}
+{% block content %}
+<div class="pagehead"><div><h1>Mailing list</h1><p class="muted">People who agreed to get tech tips, discounts and special-occasion deals.</p></div>
+{% if g.user['role'] == 'owner' %}<a class="btn primary" href="{{ url_for('export_mailing_list') }}">Export active subscribers (CSV)</a>{% endif %}</div>
+
+<section class="stats two-stats">
+  <a class="stat" href="{{ url_for('mailing_list') }}"><span class="num">{{ n_active }}</span><span>Active subscribers</span></a>
+  <a class="stat" href="{{ url_for('mailing_list', status='unsubscribed') }}"><span class="num">{{ n_unsub }}</span><span>Unsubscribed (never email these)</span></a>
+</section>
+
+<section class="card">
+  <h2>Before you send an email</h2>
+  <ul>
+    <li>Only email people who agreed. Every person here has a recorded date and note showing how they agreed.</li>
+    <li>Every email needs a working <b>unsubscribe</b> link and your shop's real <b>postal address</b> (a PO box or mail drop works if you keep your home address private).</li>
+    <li>Honor unsubscribes quickly. Click <b>Unsubscribe</b> here the moment someone asks, and also in your email service.</li>
+    <li>Keep subject lines honest, and make it clear when an email is an offer.</li>
+  </ul>
+  <p class="tiny muted">Website signups arrive by email from Formspree. Add them here (one at a time, or paste several) so you have one clean list. This is general guidance, not legal advice.</p>
+</section>
+
+<div class="grid2">
+<section class="card" id="add">
+  <h2>Add a subscriber</h2>
+  <form method="post" action="{{ url_for('mailing_add') }}">{{ csrf() }}
+    <div class="two"><label>Email<input type="email" name="email" value="{{ prefill.email }}" required maxlength="120"></label>
+    <label>First name<input name="name" value="{{ prefill.name }}" maxlength="80"></label></div>
+    <div class="two"><label>Interested in<select name="interest">{{ options(INTERESTS) }}</select></label>
+    <label>How they signed up<select name="source">{{ options(SUB_SOURCES, 'Website form') }}</select></label></div>
+    <fieldset class="topics"><legend>What they want to get</legend>
+      {% for tp in TOPICS %}<label class="check"><input type="checkbox" name="topics" value="{{ tp }}" checked> {{ tp }}</label>{% endfor %}
+    </fieldset>
+    <label>Note (optional)<input name="note" maxlength="200" placeholder="Example: signed up on the website on Oct 21"></label>
+    <label class="check"><input type="checkbox" name="consent" value="1" required> This person agreed to receive emails from us</label>
+    <button class="btn primary" type="submit">Add subscriber</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Paste several at once</h2>
+  <form method="post" action="{{ url_for('mailing_paste') }}">{{ csrf() }}
+    <label>One per line: email, first name, interest, topics (everything after the email is optional; leave topics blank for all three)
+      <textarea name="lines" rows="6" placeholder="pat@example.com, Pat&#10;sam@example.com, Sam, Gaming and consoles"></textarea></label>
+    <label>How they signed up<select name="source">{{ options(SUB_SOURCES, 'Website form') }}</select></label>
+    <label class="check"><input type="checkbox" name="consent" value="1" required> Everyone listed agreed to receive emails from us</label>
+    <button class="btn primary" type="submit">Add them</button>
+  </form>
+</section>
+</div>
+
+{% if g.user['role'] == 'owner' %}
+<section class="card">
+  <h2>Import a CSV file</h2>
+  <form method="post" action="{{ url_for('mailing_import') }}" enctype="multipart/form-data" class="inlineform">{{ csrf() }}
+    <input type="file" name="file" accept=".csv" required>
+    <label class="check"><input type="checkbox" name="consent" value="1" required> Everyone in the file agreed to receive emails from us</label>
+    <button class="btn primary" type="submit">Import</button>
+  </form>
+  <p class="tiny muted">The first row needs an <b>Email</b> column. <b>Name</b>, <b>Interest</b> and <b>Topics</b> columns are optional (blank topics means all three). People who unsubscribed before are never added back by an import.</p>
+</section>
+{% endif %}
+
+<form class="filters" method="get">
+  <select name="status" data-autosubmit><option value="active" {{ 'selected' if status == 'active' }}>Active</option><option value="unsubscribed" {{ 'selected' if status == 'unsubscribed' }}>Unsubscribed</option><option value="all" {{ 'selected' if status == 'all' }}>Everyone</option></select>
+  <input type="search" name="q" value="{{ q }}" placeholder="Search email or name"><button class="btn">Search</button>
+</form>
+<div class="card tablewrap"><table>
+<thead><tr><th>Email</th><th>Name</th><th>Interest</th><th>Wants</th><th>How and when they agreed</th><th>Status</th><th></th></tr></thead>
+<tbody>{% for r in rows %}<tr>
+<td><b>{{ r['email'] }}</b></td><td>{{ r['name'] or '' }}</td><td>{{ r['interest'] or '' }}</td>
+<td class="tiny">{{ r['topics'] or 'All' }}</td>
+<td><span class="tiny">{{ r['source'] }} &middot; {{ r['consent_at']|dt }}</span><br><span class="tiny muted">{{ r['consent_note'] or '' }}</span></td>
+<td>{% if r['status'] == 'active' %}<span class="badge st-completed">Active</span>{% else %}<span class="badge st-cancelled">Unsubscribed</span><br><span class="tiny muted">{{ r['unsubscribed_at']|dt }}</span>{% endif %}</td>
+<td class="nowrap">
+{% if r['status'] == 'active' %}<form method="post" action="{{ url_for('mailing_unsubscribe', sid=r['id']) }}" class="inline">{{ csrf() }}<button class="linkish danger" data-confirm="Unsubscribe {{ r['email'] }}? They will not be emailed.">Unsubscribe</button></form>
+{% elif g.user['role'] == 'owner' %}<form method="post" action="{{ url_for('mailing_resubscribe', sid=r['id']) }}" class="inline">{{ csrf() }}<label class="check inlinecheck"><input type="checkbox" name="consent" value="1" required> asked to rejoin</label><button class="linkish">Re-subscribe</button></form>{% endif %}
+</td></tr>
+{% else %}<tr><td colspan="7" class="muted">No one here yet.</td></tr>{% endfor %}</tbody></table></div>
+<p class="tiny muted">People are never deleted from this list. Unsubscribed addresses stay on file so nobody is emailed or re-added by mistake.</p>
+{% endblock %}

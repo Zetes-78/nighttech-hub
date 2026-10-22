@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Wiki{% endblock %}
+{% block content %}
+<div class="pagehead"><div><h1>Wiki</h1><p class="muted">Procedures, checklists and know-how for the shop.</p></div><a class="btn primary" href="{{ url_for('wiki_new') }}">+ New page</a></div>
+<form class="filters" method="get"><input type="search" name="q" value="{{ q }}" placeholder="Search the wiki"><button class="btn">Search</button></form>
+<div class="grid3">{% for p in rows %}<a class="card tile" href="{{ url_for('wiki_page', slug=p['slug']) }}"><h2>{{ p['title'] }}</h2><span class="tiny muted">Updated {{ p['updated_at']|dt }}</span></a>{% else %}<p class="muted">No pages match.</p>{% endfor %}</div>
+{% endblock %}

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block title %}{{ 'Edit' if p.slug else 'New' }} page{% endblock %}
+{% block content %}
+<h1>{{ 'Edit page' if p.slug else 'New page' }}</h1>
+<form method="post" class="card">
+  {{ csrf() }}
+  <label>Title<input name="title" value="{{ p.title }}" required maxlength="120"></label>
+  <label>Content<textarea name="body" rows="22" class="mono">{{ p.body }}</textarea></label>
+  <p class="tiny muted">Formatting: <code># Heading</code>, <code>## Smaller heading</code>, <code>- bullet</code>, <code>1. numbered</code>, <code>**bold**</code>, <code>[link text](https://...)</code>. Don't store passwords here.</p>
+  <button class="btn primary" type="submit">Save page</button> <a class="btn" href="{{ url_for('wiki_page', slug=p.slug) if p.slug else url_for('wiki_index') }}">Cancel</a>
+</form>
+{% endblock %}

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge %}
+{% block title %}{{ c['name'] }}{% endblock %}
+{% block content %}
+<div class="pagehead"><div><h1>{{ c['name'] }}</h1>
+<p class="muted">{{ c['phone'] }} {% if c['email'] %}&middot; {{ c['email'] }}{% endif %} {% if c['ok_to_text'] %}&middot; OK to text{% endif %}</p></div>
+<div class="actions">{% if c['email'] %}<a class="btn" href="{{ url_for('mailing_list', email=c['email'], name=c['name'].split(' ')[0]) }}#add" title="Opens the Add a subscriber form, filled in">Add to mailing list</a>{% endif %}<a class="btn" href="{{ url_for('customer_edit', cid=c['id']) }}">Edit</a> <a class="btn primary" href="{{ url_for('ticket_new', customer=c['id']) }}">+ New ticket</a></div></div>
+{% if c['notes'] %}<section class="card"><h2>Notes</h2><p class="pre">{{ c['notes'] }}</p></section>{% endif %}
+<section class="card"><h2>Tickets</h2>
+<div class="tablewrap"><table><thead><tr><th>Ticket</th><th>Service</th><th>Status</th><th>Opened</th></tr></thead><tbody>
+{% for t in tix %}<tr><td><a href="{{ url_for('ticket_view', tid=t['id']) }}"><b>{{ t['number'] }}</b></a></td><td>{{ t['service_type'] }}</td><td>{{ badge(t['status']) }}</td><td>{{ t['created_at']|dt }}</td></tr>
+{% else %}<tr><td colspan="4" class="muted">No tickets yet.</td></tr>{% endfor %}</tbody></table></div></section>
+<section class="card"><h2>Devices</h2>
+{% for d in devs %}<p><a href="{{ url_for('ticket_view', tid=d['ticket_id']) }}"><b>{{ d['number'] }}</b></a> {{ d['device_type'] }} {{ d['make_model'] }} <span class="muted">SN {{ d['serial'] }} {% if d['disposition'] %}&middot; {{ d['disposition'] }}{% endif %}</span></p>{% else %}<p class="muted">None.</p>{% endfor %}</section>
+{% endblock %}

@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, badge, options %}
+{% block title %}{{ t['number'] }}{% endblock %}
+{% block content %}
+<div class="pagehead" id="top">
+  <div>
+    <h1>{{ t['number'] }} {{ badge(t['status']) }}{% if t['priority'] == 'High' %} <span class="pri">High priority</span>{% endif %}</h1>
+    <p class="muted"><a href="{{ url_for('customer_view', cid=c['id']) }}"><b>{{ c['name'] }}</b></a> &middot; {{ c['phone'] }} {% if c['ok_to_text'] %}(OK to text){% endif %} &middot; {{ t['service_type'] }} &middot; opened {{ t['created_at']|dt }}</p>
+  </div>
+  <div class="actions">
+    <a class="btn" href="{{ url_for('pdf_label', tid=t['id']) }}" target="_blank">Print label</a>
+    <a class="btn" href="{{ url_for('pdf_dropoff_receipt', tid=t['id']) }}" target="_blank">Drop-off receipt</a>
+    <a class="btn" href="{{ url_for('pdf_dropoff_receipt', tid=t['id'], copies='customer') }}" target="_blank" title="Just the customer's copy, to text or email">Receipt (customer copy)</a>
+    <a class="btn" href="{{ url_for('pdf_pickup_receipt', tid=t['id']) }}" target="_blank">Pick-up receipt</a>
+    <a class="btn" href="{{ url_for('pdf_certificate', tid=t['id']) }}" target="_blank">Wipe certificate</a>
+    <a class="btn" href="{{ url_for('pdf_release', tid=t['id']) }}" target="_blank">Drop-off release</a>
+  </div>
+</div>
+
+<section class="card">
+  <h2>Status</h2>
+  <form method="post" action="{{ url_for('ticket_status', tid=t['id']) }}" class="inlineform">
+    {{ csrf() }}
+    <select name="status">{{ options(STATUSES, t['status']) }}</select>
+    <input name="note" placeholder="Optional note to add with the change" maxlength="2000">
+    <button class="btn primary" type="submit">Update status</button>
+  </form>
+</section>
+
+<section class="card" id="devices">
+  <h2>Devices ({{ devs|length }})</h2>
+  {% for d in devs %}
+  <form method="post" action="{{ url_for('device_update', tid=t['id'], did=d['id']) }}" class="devcard">
+    {{ csrf() }}
+    <div class="devgrid">
+      <label>Type<select name="device_type"><option value="">(none)</option>{{ options(DEVICE_TYPES, d['device_type']) }}</select></label>
+      <label>Make and model<input name="make_model" value="{{ d['make_model'] or '' }}" maxlength="120"></label>
+      <label>Serial or IMEI<input name="serial" value="{{ d['serial'] or '' }}" maxlength="80"></label>
+      <label>Storage<select name="storage_type">{% for s in STORAGE_TYPES %}<option value="{{ s }}" {{ 'selected' if s == (d['storage_type'] or '') }}>{{ s or '(none)' }}</option>{% endfor %}</select></label>
+      <label>What happened to it<select name="disposition">{% for s in DISPOSITIONS %}<option value="{{ s }}" {{ 'selected' if s == (d['disposition'] or '') }}>{{ s or '(not decided)' }}</option>{% endfor %}</select></label>
+      <label>Date<input type="date" name="disposition_date" value="{{ d['disposition_date'] or '' }}"></label>
+      <label class="wide">Notes<input name="notes" value="{{ d['notes'] or '' }}" maxlength="500"></label>
+    </div>
+    <button class="btn small" type="submit">Save device</button>
+  </form>
+  {% else %}<p class="muted">No devices on this ticket.</p>{% endfor %}
+  <details><summary>+ Add a device</summary>
+  <form method="post" action="{{ url_for('device_add', tid=t['id']) }}" class="devcard">
+    {{ csrf() }}
+    <div class="devgrid">
+      <label>Type<select name="device_type"><option value="">(none)</option>{{ options(DEVICE_TYPES) }}</select></label>
+      <label>Make and model<input name="make_model" maxlength="120"></label>
+      <label>Serial or IMEI<input name="serial" maxlength="80"></label>
+      <label>Storage<select name="storage_type">{% for s in STORAGE_TYPES %}<option value="{{ s }}">{{ s or '(none)' }}</option>{% endfor %}</select></label>
+    </div>
+    <button class="btn small primary" type="submit">Add device</button>
+  </form></details>
+</section>
+
+<section class="card">
+  <h2>Details, wipe record and handoff</h2>
+  <form method="post" action="{{ url_for('ticket_update', tid=t['id']) }}">
+    {{ csrf() }}
+    <div class="devgrid">
+      <label>Service<select name="service_type">{{ options(SERVICES, t['service_type']) }}</select></label>
+      <label>Priority<select name="priority">{{ options(PRIORITIES, t['priority']) }}</select></label>
+      <label>Assigned to<select name="assigned_to"><option value="">(nobody)</option>{% for u in users %}<option value="{{ u['id'] }}" {{ 'selected' if t['assigned_to'] == u['id'] }}>{{ u['display_name'] }}</option>{% endfor %}</select></label>
+      <label>Due date<input type="date" name="due_date" value="{{ t['due_date'] or '' }}"></label>
+      <label>Storage location<input name="storage_location" value="{{ t['storage_location'] or '' }}" maxlength="120" list="locs"><datalist id="locs">{% for l in LOCATIONS %}<option value="{{ l }}">{% endfor %}</datalist></label>
+      <label>Quote ($)<input name="quote_amount" inputmode="decimal" value="{{ t['quote_amount'] if t['quote_amount'] is not none else '' }}" placeholder="0.00"></label>
+      <label class="wide">Square invoice link<input name="invoice_link" value="{{ t['invoice_link'] or '' }}" placeholder="https://squareup.com/..." maxlength="300"></label>
+      <label class="wide">Problem<textarea name="problem" rows="3" maxlength="3000">{{ t['problem'] or '' }}</textarea></label>
+    </div>
+    <h3>Wipe record <span class="tiny muted">(prints on the Certificate of Data Wipe)</span></h3>
+    <div class="devgrid">
+      <label class="wide">Wipe method used<input name="wipe_method" value="{{ t['wipe_method'] or '' }}" maxlength="300"></label>
+      <label>Wipe started<input name="wipe_started" value="{{ t['wipe_started'] or '' }}" placeholder="2026-10-22 18:30" maxlength="40"></label>
+      <label>Wipe finished<input name="wipe_finished" value="{{ t['wipe_finished'] or '' }}" placeholder="2026-10-22 20:10" maxlength="40"></label>
+      <label class="check"><input type="checkbox" name="wipe_checked" value="1" {{ 'checked' if t['wipe_checked'] }}> Wipe finished and checked</label>
+      <label>Handed off to<input name="handoff_to" value="{{ t['handoff_to'] or '' }}" placeholder="Recycler or recipient" maxlength="200"></label>
+    </div>
+    <button class="btn primary" type="submit">Save ticket</button>
+    {% if t['invoice_link'] %}<a class="btn" href="{{ t['invoice_link'] }}" target="_blank" rel="noopener">Open invoice</a>{% endif %}
+  </form>
+</section>
+
+<div class="grid2">
+<section class="card" id="notes">
+  <h2>Notes</h2>
+  <form method="post" action="{{ url_for('ticket_note', tid=t['id']) }}">{{ csrf() }}
+    <textarea name="body" rows="3" placeholder="Add a note. Never include passwords or passcodes." maxlength="4000" required></textarea>
+    <button class="btn small primary" type="submit">Add note</button></form>
+  {% for n in notes %}<div class="note"><p class="pre">{{ n['body'] }}</p><span class="tiny muted">{{ n['uname'] or 'System' }} &middot; {{ n['created_at']|dt }}</span></div>{% endfor %}
+</section>
+
+<section class="card" id="parts">
+  <h2>Parts</h2>
+  <form method="post" action="{{ url_for('ticket_part', tid=t['id']) }}" class="inlineform">{{ csrf() }}
+    <input name="name" placeholder="Part" required maxlength="120"><input name="qty" type="number" min="1" value="1" class="short"><input name="cost" inputmode="decimal" placeholder="Cost" class="short">
+    <button class="btn small primary" type="submit">Add</button></form>
+  {% for p in parts %}<p>{{ p['qty'] }} &times; {{ p['name'] }} <span class="muted">{{ (p['cost'] or 0)|money }}</span></p>{% endfor %}
+  {% if parts %}<p><b>Parts total: {{ parts_total|money }}</b></p>{% endif %}
+  <h2 id="time">Time</h2>
+  <form method="post" action="{{ url_for('ticket_time', tid=t['id']) }}" class="inlineform">{{ csrf() }}
+    <input name="minutes" type="number" min="1" max="1440" placeholder="Minutes" class="short" required><input name="note" placeholder="What you did" maxlength="300">
+    <button class="btn small primary" type="submit">Log time</button></form>
+  {% for x in times %}<p>{{ x['minutes'] }} min <span class="muted">{{ x['note'] }} &middot; {{ x['uname'] or '' }} &middot; {{ x['created_at']|dt }}</span></p>{% endfor %}
+  {% if times %}<p><b>Total: {{ minutes // 60 }} h {{ minutes % 60 }} min</b></p>{% endif %}
+</section>
+</div>
+
+<div class="grid2">
+<section class="card" id="files">
+  <h2>Files and photos</h2>
+  <form method="post" action="{{ url_for('ticket_upload', tid=t['id']) }}" enctype="multipart/form-data" class="inlineform">{{ csrf() }}
+    <input type="file" name="file" required>
+    <select name="category">{{ options(FILE_CATEGORIES, 'Photo') }}</select>
+    <input name="description" placeholder="Description (optional)" maxlength="300">
+    <button class="btn small primary" type="submit">Upload</button></form>
+  {% for f in files %}<p><a href="{{ url_for('file_download', fid=f['id']) }}"><b>{{ f['original_name'] }}</b></a> <span class="muted">{{ f['category'] }} &middot; {{ (f['size'] // 1024) or 1 }} KB &middot; {{ f['created_at']|dt }}</span> {{ f['description'] or '' }}</p>{% else %}<p class="muted">No files yet. Add a photo when the device comes in.</p>{% endfor %}
+</section>
+
+<section class="card">
+  <h2>Chain of custody</h2>
+  <p class="tiny muted">Every change is recorded here and can't be edited.</p>
+  <ul class="timeline">{% for e in events %}<li><b>{{ e['kind'] }}</b>{% if e['detail'] %}: {{ e['detail'] }}{% endif %}<br><span class="tiny muted">{{ e['uname'] or 'System' }} &middot; {{ e['created_at']|dt }}</span></li>{% endfor %}</ul>
+</section>
+</div>
+{% endblock %}

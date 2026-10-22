@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block title %}Team{% endblock %}
+{% block content %}
+<div class="pagehead"><div><h1>Team</h1><p class="muted">Everyone who can sign in to the Hub. Give each person their own login so the chain-of-custody log shows who did what.</p></div></div>
+
+<section class="card">
+  <h2>Add a person</h2>
+  <form method="post" action="{{ url_for('user_add') }}">{{ csrf() }}
+    <div class="two"><label>Their name<input name="display_name" placeholder="Carin" required maxlength="80"></label>
+    <label>Username (letters and numbers)<input name="username" placeholder="carin" required pattern="[A-Za-z0-9._-]{3,40}" autocomplete="off"></label></div>
+    <div class="two"><label>Starting password (10 or more characters)<input type="text" id="newpw" name="password" minlength="10" required autocomplete="off" spellcheck="false"></label>
+    <label>Role<select name="role"><option value="staff">Staff: tickets, customers, files, forms, wiki</option><option value="owner">Owner: everything, including Team, backups and settings</option></select></label></div>
+    <p><button class="btn" type="button" id="genpw">Suggest a strong password</button> <span class="tiny muted">Write it down for them. They can change it in Settings after they sign in.</span></p>
+    <button class="btn primary" type="submit">Add person</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>People who can sign in</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+    {% for u in users %}<tr>
+      <td><b>{{ u['display_name'] }}</b>{% if u['id'] == g.user['id'] %} <span class="tiny muted">(you)</span>{% endif %}</td><td>{{ u['username'] }}</td><td>{{ u['role'] }}</td><td>{{ 'Active' if u['active'] else 'Turned off' }}</td>
+      <td class="nowrap">
+        {% if u['id'] != g.user['id'] %}<form method="post" action="{{ url_for('user_toggle', uid=u['id']) }}" class="inline">{{ csrf() }}<button class="linkish">{{ 'Turn off' if u['active'] else 'Turn on' }}</button></form>{% endif %}
+        <form method="post" action="{{ url_for('user_reset', uid=u['id']) }}" class="inline">{{ csrf() }}<input type="text" name="password" placeholder="New password" minlength="10" class="short" autocomplete="off"><button class="linkish">Reset password</button></form>
+      </td></tr>{% endfor %}
+    </tbody></table></div>
+  <p class="tiny muted">Turning someone off keeps all their history but stops them signing in. Nobody can be deleted, so the log stays complete.</p>
+</section>
+{% endblock %}

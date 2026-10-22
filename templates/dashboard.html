@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="pagehead"><div><h1>Dashboard</h1><p class="muted">{{ g.user['display_name'] }}, here is what's happening in the shop.</p></div>
+<div class="hours">{{ shop.hours }}</div></div>
+{% if g.user['role'] == 'owner' and team_size == 1 %}<div class="flash ok">Only you can sign in right now. <a href="{{ url_for('team') }}"><b>Add Carin or anyone else</b></a> so they get their own login.</div>{% endif %}
+
+<section class="stats">
+  <a class="stat" href="{{ url_for('tickets') }}"><span class="num">{{ stats.open }}</span><span>Open tickets</span></a>
+  <a class="stat" href="{{ url_for('tickets', status='Ready for pickup') }}"><span class="num">{{ counts.get('Ready for pickup', 0) }}</span><span>Ready for pickup</span></a>
+  <a class="stat" href="{{ url_for('tickets') }}"><span class="num">{{ stats.in_shop }}</span><span>Devices in the shop</span></a>
+  <a class="stat" href="{{ url_for('customers') }}"><span class="num">{{ stats.customers }}</span><span>Customers</span></a>
+</section>
+
+<section class="chips">
+  {% for s in STATUSES %}<a class="chip" href="{{ url_for('tickets', status=s) }}">{{ badge(s) }} <b>{{ counts.get(s, 0) }}</b></a>{% endfor %}
+</section>
+
+<div class="grid2">
+  <section class="card">
+    <h2>Ready for pickup</h2>
+    {% if ready %}<ul class="rows">{% for t in ready %}<li><a href="{{ url_for('ticket_view', tid=t['id']) }}"><b>{{ t['number'] }}</b> {{ t['cname'] }}</a><span class="muted">{{ t['service_type'] }}</span></li>{% endfor %}</ul>
+    {% else %}<p class="muted">Nothing waiting right now.</p>{% endif %}
+  </section>
+  <section class="card">
+    <h2>Needs attention</h2>
+    <p class="tiny muted">Open tickets with no update in 5 days.</p>
+    {% if stale %}<ul class="rows">{% for t in stale %}<li><a href="{{ url_for('ticket_view', tid=t['id']) }}"><b>{{ t['number'] }}</b> {{ t['cname'] }}</a><span>{{ badge(t['status']) }}</span></li>{% endfor %}</ul>
+    {% else %}<p class="muted">Everything is moving.</p>{% endif %}
+  </section>
+</div>
+
+<div class="grid2">
+  <section class="card">
+    <h2>Recent activity</h2>
+    {% if recent %}<ul class="rows">{% for e in recent %}<li><span><a href="{{ url_for('ticket_view', tid=e['tid']) }}"><b>{{ e['number'] }}</b></a> {{ e['kind'] }}{% if e['detail'] %}: {{ e['detail'] }}{% endif %}<br><span class="tiny muted">{{ e['uname'] or 'System' }} &middot; {{ e['created_at']|dt }}</span></span></li>{% endfor %}</ul>
+    {% else %}<p class="muted">No activity yet. <a href="{{ url_for('ticket_new') }}">Create the first ticket.</a></p>{% endif %}
+  </section>
+  <section class="card">
+    <h2>Info hub</h2>
+    <ul class="links">
+      <li><a href="{{ url_for('mailing_list') }}">Mailing list ({{ list_count }} subscribers)</a></li>
+      <li><a href="https://nighttech.solutions" target="_blank" rel="noopener">Website</a></li>
+      <li><a href="https://app.squareup.com/dashboard/" target="_blank" rel="noopener">Square dashboard</a></li>
+      <li><a href="https://voice.google.com" target="_blank" rel="noopener">Google Voice (texts and calls)</a></li>
+      <li><a href="https://mail.google.com" target="_blank" rel="noopener">Business email</a></li>
+      <li><a href="https://www.facebook.com/profile.php?id=61595228504921" target="_blank" rel="noopener">Facebook Page</a></li>
+      <li><a href="https://www.instagram.com/nighttechsolutions1/" target="_blank" rel="noopener">Instagram</a></li>
+      <li><a href="https://www.linkedin.com/company/nighttech-solutions" target="_blank" rel="noopener">LinkedIn</a></li>
+      <li><a href="https://x.com/NightTechSol" target="_blank" rel="noopener">X</a></li>
+    </ul>
+    <p class="tiny muted">Call or text {{ shop.phone }} &middot; {{ shop.email }}</p>
+  </section>
+</div>
+{% endblock %}

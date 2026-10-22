@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Forms{% endblock %}
+{% block content %}
+<div class="pagehead"><div><h1>Forms</h1><p class="muted">Print any form blank, or fill it in automatically from a ticket. Opens as a PDF you can print, save or email.</p></div></div>
+<div class="grid2">
+{% for slug, name, desc, has_copies in forms %}
+<section class="card">
+  <h2>{{ name }}</h2>
+  <p class="muted">{{ desc }}</p>
+  <form method="get" action="{{ url_for('form_pdf', kind=slug) }}" target="_blank">
+    <label>Fill in from a ticket
+      <select name="ticket"><option value="">Blank form</option>{% for t in tix %}<option value="{{ t['id'] }}">{{ t['number'] }}: {{ t['cname'] }} ({{ t['status'] }})</option>{% endfor %}</select></label>
+    {% if has_copies %}<label>Copies
+      <select name="copies"><option value="both">Customer copy and shop copy</option><option value="customer">Customer copy only (to text or email)</option></select></label>{% endif %}
+    <button class="btn primary" type="submit">Open PDF</button>
+  </form>
+</section>
+{% endfor %}
+</div>
+<section class="card">
+  <h2>Tips</h2>
+  <ul>
+    <li>Porch drop-off: after you collect the device and create the ticket, send the customer their <b>customer copy</b> by text or email so they have a record.</li>
+    <li>On each ticket, the buttons at the top print the same forms already filled in, and every print is added to the chain-of-custody log.</li>
+    <li>Keep signed copies. Scan or photograph them and attach them to the ticket under Files and photos.</li>
+  </ul>
+</section>
+{% endblock %}

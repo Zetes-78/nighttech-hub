@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<div class="pagehead"><div><h1>Settings</h1><p class="muted">Your shop's details, lists and backups.</p></div>
+{% if g.user['role'] == 'owner' %}<a class="btn primary" href="{{ url_for('team') }}">Team: add Carin or others</a>{% endif %}</div>
+
+{% if g.user['role'] == 'owner' %}
+<nav class="subnav"><a href="#shop">Shop details</a><a href="#lists">Services and locations</a><a href="#receipt">Receipt wording</a><a href="#backup">Backups</a><a href="#account">Your password</a><a href="{{ url_for('team') }}">Team</a></nav>
+
+<section class="card" id="shop">
+  <h2>Shop details</h2>
+  <p class="muted">These appear on every receipt, certificate, release, label and on the dashboard.</p>
+  <form method="post" action="{{ url_for('settings_shop') }}">{{ csrf() }}
+    <div class="two"><label>Shop name<input name="shop_name" value="{{ cfg.shop_name }}" required maxlength="80"></label>
+    <label>Phone<input name="shop_phone" value="{{ cfg.shop_phone }}" maxlength="30"></label></div>
+    <div class="two"><label>Email<input type="email" name="shop_email" value="{{ cfg.shop_email }}" maxlength="120"></label>
+    <label>Website<input name="shop_web" value="{{ cfg.shop_web }}" maxlength="120"></label></div>
+    <div class="two"><label>Service area<input name="shop_area" value="{{ cfg.shop_area }}" maxlength="120"></label>
+    <label>Hours (shown on the dashboard)<input name="shop_hours" value="{{ cfg.shop_hours }}" maxlength="120"></label></div>
+    <button class="btn primary" type="submit">Save shop details</button>
+  </form>
+</section>
+
+<section class="card" id="lists">
+  <h2>Services and storage locations</h2>
+  <form method="post" action="{{ url_for('settings_lists') }}">{{ csrf() }}
+    <div class="two">
+      <label>Services you offer (one per line)<textarea name="services" rows="12">{{ svc_text }}</textarea></label>
+      <label>Storage locations (one per line)<textarea name="storage_locations" rows="12" placeholder="Locked shelf A&#10;Locked cabinet, bin 1&#10;Bench 2">{{ loc_text }}</textarea></label>
+    </div>
+    <p class="tiny muted">Services fill the dropdown on every ticket. Storage locations show up as suggestions when you record where a device is kept. Changing the list never changes old tickets.</p>
+    <button class="btn primary" type="submit">Save lists</button>
+  </form>
+</section>
+
+<section class="card" id="receipt">
+  <h2>Drop-off receipt wording</h2>
+  <form method="post" action="{{ url_for('settings_receipt') }}">{{ csrf() }}
+    <label>Notes printed at the bottom of the drop-off receipt (up to 3 lines)<textarea name="dropoff_note" rows="4">{{ cfg.dropoff_note }}</textarea></label>
+    <p class="tiny muted">Use <code>{phone}</code> to insert your phone number automatically. Don't promise warranties or timelines here unless you're sure you'll keep them.</p>
+    <button class="btn primary" type="submit">Save wording</button>
+  </form>
+</section>
+
+<section class="card" id="backup">
+  <h2>Backups and exports</h2>
+  <p>Download a full backup (database and every file). Do this weekly, and keep a copy somewhere other than this computer.</p>
+  <p><a class="btn primary" href="{{ url_for('backup') }}">Download backup</a> <a class="btn" href="{{ url_for('export_customers') }}">Customers (CSV)</a> <a class="btn" href="{{ url_for('export_tickets') }}">Tickets (CSV)</a></p>
+</section>
+{% else %}
+<section class="card"><h2>Shop settings</h2><p class="muted">The owner manages shop details, lists, backups and the team. You can change your own password below.</p></section>
+{% endif %}
+
+<section class="card narrow" id="account">
+  <h2>Your password</h2>
+  <p class="muted">Signed in as <b>{{ g.user['display_name'] }}</b> ({{ g.user['role'] }}).</p>
+  <form method="post" action="{{ url_for('change_password') }}">{{ csrf() }}
+    <label>Current password<input type="password" name="current" autocomplete="current-password" required></label>
+    <label>New password (10 or more characters)<input type="password" name="new" minlength="10" autocomplete="new-password" required></label>
+    <label>Repeat new password<input type="password" name="new2" minlength="10" autocomplete="new-password" required></label>
+    <button class="btn primary" type="submit">Change password</button></form>
+</section>
+{% endblock %}

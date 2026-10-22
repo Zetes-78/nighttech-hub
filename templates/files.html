@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, options %}
+{% block title %}Files{% endblock %}
+{% block content %}
+<div class="pagehead"><h1>Files</h1></div>
+<section class="card">
+  <h2>Add a file</h2>
+  <form method="post" enctype="multipart/form-data" class="inlineform">{{ csrf() }}
+    <input type="file" name="file" required>
+    <select name="category">{{ options(FILE_CATEGORIES, 'General') }}</select>
+    <select name="customer_id"><option value="">No customer</option>{% for c in custs %}<option value="{{ c['id'] }}">{{ c['name'] }}</option>{% endfor %}</select>
+    <input name="description" placeholder="Description (optional)" maxlength="300">
+    <button class="btn primary" type="submit">Upload</button></form>
+  <p class="tiny muted">Allowed: photos, PDF, text, CSV, Word and Excel files up to 25 MB. Files attached to a ticket also show up here.</p>
+</section>
+<form class="filters" method="get"><input type="search" name="q" value="{{ q }}" placeholder="Search files, customers, tickets"><button class="btn">Search</button></form>
+<div class="card tablewrap"><table>
+<thead><tr><th>File</th><th>Category</th><th>Ticket</th><th>Customer</th><th>Added</th>{% if g.user['role'] == 'owner' %}<th></th>{% endif %}</tr></thead>
+<tbody>{% for f in rows %}<tr><td><a href="{{ url_for('file_download', fid=f['id']) }}"><b>{{ f['original_name'] }}</b></a><br><span class="tiny muted">{{ f['description'] or '' }}</span></td><td>{{ f['category'] }}</td>
+<td>{% if f['ticket_id'] %}<a href="{{ url_for('ticket_view', tid=f['ticket_id']) }}">{{ f['number'] }}</a>{% endif %}</td><td>{{ f['cname'] or '' }}</td><td>{{ f['created_at']|dt }}</td>
+{% if g.user['role'] == 'owner' %}<td><form method="post" action="{{ url_for('file_delete', fid=f['id']) }}" class="inline">{{ csrf() }}<input type="hidden" name="back" value="{{ url_for('files') }}"><button class="linkish danger" data-confirm="Delete this file for good?">Delete</button></form></td>{% endif %}</tr>
+{% else %}<tr><td colspan="6" class="muted">No files yet.</td></tr>{% endfor %}</tbody></table></div>
+{% endblock %}

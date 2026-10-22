@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, options %}
+{% block title %}New ticket{% endblock %}
+{% block content %}
+<h1>New ticket</h1>
+<form method="post" class="card">
+  {{ csrf() }}
+  <h2>Customer</h2>
+  <label>Choose a customer
+    <select name="customer_id" id="customer_id" required>
+      <option value="">Select...</option><option value="new">+ New customer</option>
+      {% for c in custs %}<option value="{{ c['id'] }}" {{ 'selected' if pre == c['id']|string }}>{{ c['name'] }} {{ c['phone'] or '' }}</option>{% endfor %}
+    </select></label>
+  <div id="newcust" class="subbox" hidden>
+    <div class="two"><label>Name<input name="name" maxlength="120"></label><label>Phone<input name="phone" maxlength="40"></label></div>
+    <div class="two"><label>Email<input type="email" name="email" maxlength="120"></label><label class="check"><input type="checkbox" name="ok_to_text" value="1"> OK to text</label></div>
+  </div>
+  <h2>The job</h2>
+  <div class="two"><label>Service<select name="service_type" required>{{ options(SERVICES) }}</select></label>
+  <label>Priority<select name="priority"><option>Normal</option><option>High</option><option>Low</option></select></label></div>
+  <label>What's going on?<textarea name="problem" rows="4" maxlength="3000" placeholder="Describe the problem in the customer's words."></textarea></label>
+  <label>Where is it stored? <input name="storage_location" maxlength="120" list="locs" placeholder="Example: Locked shelf A, bin 3"><datalist id="locs">{% for l in LOCATIONS %}<option value="{{ l }}">{% endfor %}</datalist></label>
+  <h2>Devices</h2>
+  <p class="tiny muted">Add every device that came in. Leave blank for jobs without a device. Don't enter passcodes.</p>
+  <div id="devices">
+    <div class="devrow">
+      <select name="dev_type"><option value="">Type</option>{{ options(DEVICE_TYPES) }}</select>
+      <input name="dev_model" placeholder="Make and model" maxlength="120">
+      <input name="dev_serial" placeholder="Serial number or IMEI" maxlength="80">
+      <select name="dev_storage">{% for s in STORAGE_TYPES %}<option value="{{ s }}">{{ s or 'Storage' }}</option>{% endfor %}</select>
+    </div>
+  </div>
+  <p><button class="btn" type="button" id="adddev">+ Add another device</button></p>
+  <button class="btn primary" type="submit">Create ticket</button> <a class="btn" href="{{ url_for('tickets') }}">Cancel</a>
+</form>
+{% endblock %}

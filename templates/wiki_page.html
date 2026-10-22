@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block title %}{{ p['title'] }}{% endblock %}
+{% block content %}
+<div class="pagehead"><div><p class="tiny muted"><a href="{{ url_for('wiki_index') }}">Wiki</a> /</p><h1>{{ p['title'] }}</h1></div>
+<div><a class="btn" href="{{ url_for('wiki_edit', slug=p['slug']) }}">Edit page</a>
+{% if g.user['role'] == 'owner' %}<form method="post" action="{{ url_for('wiki_delete', slug=p['slug']) }}" class="inline">{{ csrf() }}<button class="btn danger" data-confirm="Delete this page for good?">Delete</button></form>{% endif %}</div></div>
+<article class="card prose">{{ html }}</article>
+<p class="tiny muted">Last updated {{ p['updated_at']|dt }}{% if p['uname'] %} by {{ p['uname'] }}{% endif %}</p>
+{% endblock %}

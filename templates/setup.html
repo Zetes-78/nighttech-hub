@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block title %}First-time setup{% endblock %}
+{% block bodyclass %}auth{% endblock %}
+{% block content %}
+<canvas class="sky" aria-hidden="true"></canvas>
+<section class="auth-card">
+  <img class="auth-logo" src="{{ url_for('static', filename='logo-full.png') }}" alt="{{ shop.name }}" width="190" height="192">
+  <h1>Welcome. Let's set up your Hub.</h1>
+  <p class="muted">Create the owner account. You can add Carin or other staff later in Settings.</p>
+  <form method="post" autocomplete="off">
+    {{ csrf() }}
+    <label>Your name<input name="display_name" required autofocus></label>
+    <label>Username<input name="username" required pattern="[A-Za-z0-9._-]{3,40}"></label>
+    <label>Password (10 or more characters)<input type="password" name="password" minlength="10" required autocomplete="new-password"></label>
+    <label>Repeat password<input type="password" name="password2" minlength="10" required autocomplete="new-password"></label>
+    <button class="btn primary block" type="submit">Create owner account</button>
+  </form>
+</section>
+{% endblock %}

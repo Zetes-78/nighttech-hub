@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block title %}Sign in{% endblock %}
+{% block bodyclass %}auth{% endblock %}
+{% block content %}
+<canvas class="sky" aria-hidden="true"></canvas>
+<section class="auth-card">
+  <img class="auth-logo" src="{{ url_for('static', filename='logo-full.png') }}" alt="{{ shop.name }}" width="190" height="192">
+  <h1>Night Tech Hub</h1>
+  <p class="muted">Tickets, customers, files and know-how for the shop.</p>
+  <form method="post" autocomplete="on">
+    {{ csrf() }}
+    <label>Username<input name="username" autocomplete="username" required autofocus></label>
+    <label>Password<input type="password" name="password" autocomplete="current-password" required></label>
+    <button class="btn primary block" type="submit">Sign in</button>
+  </form>
+  <p class="tiny muted">After-hours IT support &middot; {{ shop.area }}</p>
+</section>
+{% endblock %}

@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block title %}{{ 'Add customer' if mode == 'new' else 'Edit customer' }}{% endblock %}
+{% block content %}
+<h1>{{ 'Add customer' if mode == 'new' else 'Edit customer' }}</h1>
+<form method="post" class="card narrow">
+  {{ csrf() }}
+  <label>Name<input name="name" value="{{ c.get('name','') }}" required maxlength="120"></label>
+  <div class="two"><label>Phone<input name="phone" value="{{ c.get('phone','') or '' }}" maxlength="40"></label>
+  <label>Email<input type="email" name="email" value="{{ c.get('email','') or '' }}" maxlength="120"></label></div>
+  <label class="check"><input type="checkbox" name="ok_to_text" value="1" {{ 'checked' if c.get('ok_to_text') }}> OK to text this customer</label>
+  <label>Notes<textarea name="notes" rows="4" maxlength="2000">{{ c.get('notes','') or '' }}</textarea></label>
+  <p class="tiny muted">Don't put passwords or passcodes in notes.</p>
+  <button class="btn primary" type="submit">Save</button> <a class="btn" href="{{ url_for('customers') if mode == 'new' else url_for('customer_view', cid=c['id']) }}">Cancel</a>
+</form>
+{% endblock %}

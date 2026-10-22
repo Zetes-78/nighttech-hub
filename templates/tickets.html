@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge, options %}
+{% block title %}Tickets{% endblock %}
+{% block content %}
+<div class="pagehead"><h1>Tickets</h1><a class="btn primary" href="{{ url_for('ticket_new') }}">+ New ticket</a></div>
+<form class="filters" method="get">
+  <select name="status" data-autosubmit><option value="open" {{ 'selected' if status == 'open' }}>Open tickets</option><option value="all" {{ 'selected' if status == 'all' }}>All tickets</option>{{ options(STATUSES, status) }}</select>
+  <select name="service" data-autosubmit><option value="">All services</option>{{ options(SERVICES, service) }}</select>
+  <input type="search" name="q" value="{{ q }}" placeholder="Search ticket, customer, problem"><button class="btn">Filter</button>
+</form>
+<div class="card tablewrap"><table>
+<thead><tr><th>Ticket</th><th>Customer</th><th>Service</th><th>Devices</th><th>Status</th><th>Opened</th></tr></thead>
+<tbody>{% for t in rows %}<tr><td><a href="{{ url_for('ticket_view', tid=t['id']) }}"><b>{{ t['number'] }}</b></a>{% if t['priority'] == 'High' %} <span class="pri">High</span>{% endif %}</td><td>{{ t['cname'] }}</td><td>{{ t['service_type'] }}</td><td>{{ t['ndev'] }}</td><td>{{ badge(t['status']) }}</td><td>{{ t['created_at']|dt }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">No tickets match.</td></tr>{% endfor %}</tbody></table></div>
+{% endblock %}

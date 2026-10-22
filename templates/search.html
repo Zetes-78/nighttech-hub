@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge %}
+{% block title %}Search{% endblock %}
+{% block content %}
+<h1>Search</h1>
+{% if not q %}<p class="muted">Type a name, phone number, ticket number, serial number or storage spot in the box at the top.</p>{% else %}
+<p class="muted">Results for <b>{{ q }}</b></p>
+<section class="card"><h2>Customers ({{ cust|length }})</h2>
+{% for c in cust %}<p><a href="{{ url_for('customer_view', cid=c['id']) }}"><b>{{ c['name'] }}</b></a> <span class="muted">{{ c['phone'] }} {{ c['email'] }}</span></p>{% else %}<p class="muted">None.</p>{% endfor %}</section>
+<section class="card"><h2>Tickets ({{ tix|length }})</h2>
+{% for t in tix %}<p><a href="{{ url_for('ticket_view', tid=t['id']) }}"><b>{{ t['number'] }}</b> {{ t['cname'] }}</a> {{ badge(t['status']) }} <span class="muted">{{ t['service_type'] }}</span></p>{% else %}<p class="muted">None.</p>{% endfor %}</section>
+<section class="card"><h2>Devices ({{ devs|length }})</h2>
+{% for d in devs %}<p><a href="{{ url_for('ticket_view', tid=d['ticket_id']) }}"><b>{{ d['number'] }}</b></a> {{ d['device_type'] }} {{ d['make_model'] }} <span class="muted">SN {{ d['serial'] }} &middot; {{ d['cname'] }}</span></p>{% else %}<p class="muted">None.</p>{% endfor %}</section>
+{% endif %}
+{% endblock %}
