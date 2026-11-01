@@ -120,11 +120,10 @@ owner can download backups, export data, delete files or manage people.
 
 Every push to `main` runs the smoke tests (`python -m unittest discover -s tests -v`) and builds
 `NightTechHub-Setup.exe` on GitHub's Windows machines (Actions tab, download the artifact).
-Pushing a tag such as `v1.0.1` also publishes a Release with the installer and its SHA-256 file:
+Publishing a Release on GitHub (Releases, Draft a new release, tag such as `v1.0.1`) builds the installer and attaches it with its SHA-256 file. From the command line:
 
 ```
-git tag v1.0.1
-git push origin v1.0.1
+gh release create v1.0.1 --title "Night Tech Hub 1.0.1" --notes "What changed"
 ```
 
 Keep this repository **private**: it's the shop's own software. Customer data is never in the repository
