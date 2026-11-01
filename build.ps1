@@ -9,7 +9,7 @@ Write-Host "== Night Tech Hub installer build ==" -ForegroundColor Cyan
 
 # 1. Find Python
 $py = $null
-foreach ($c in @("py -3", "python")) {
+foreach ($c in @("python", "py -3")) {
     try { $v = & cmd /c "$c --version" 2>$null; if ($LASTEXITCODE -eq 0 -and $v -match "Python 3\.(\d+)") { if ([int]$Matches[1] -ge 10) { $py = $c; break } } } catch {}
 }
 if (-not $py) { throw "Python 3.10 or newer was not found. Install it from https://www.python.org/downloads/ and tick 'Add Python to PATH'." }
@@ -20,7 +20,7 @@ if (Test-Path .build-venv) { Remove-Item -Recurse -Force .build-venv }
 & cmd /c "$py -m venv .build-venv"
 $vpy = ".\.build-venv\Scripts\python.exe"
 & $vpy -m pip install --quiet --upgrade pip
-& $vpy -m pip install --quiet -r requirements.txt "pyinstaller==6.11.1"
+& $vpy -m pip install --quiet -r requirements.txt "pyinstaller>=6.11,<7"
 if ($LASTEXITCODE -ne 0) { throw "Installing the build tools failed." }
 
 # 3. Package the app (no Python needed on the target PC)
