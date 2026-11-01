@@ -264,7 +264,7 @@ class Blank(dict):
         return ""
 
 
-def _receipt_half(c, top, title, copy_label, ticket, customer, devices, mode, parts=None):
+def _receipt_half(c, top, title, copy_label, ticket, customer, devices, mode, parts=None, signature=None):
     """Draw one receipt in a 396pt-high region whose top edge is at y=top."""
     x0, w = M, CW
     # header band
@@ -318,9 +318,9 @@ def _receipt_half(c, top, title, copy_label, ticket, customer, devices, mode, pa
         for ln in _wrap(c, prob, F, 9.5, w - 6)[:2] if prob else []:
             c.setFillColor(GRAY); c.drawString(x0, y, ln); y -= 12
         y -= 22
-        _field(c, x0, y, w, "Accessories left with the device (chargers, cases, cables)")
+        _field(c, x0, y, w, "Accessories left with the device (chargers, cases, cables)", _get(ticket, "intake_accessories"))
         y -= 26
-        _field(c, x0, y, w, "Condition when received (scratches, cracks, missing parts)")
+        _field(c, x0, y, w, "Condition when received (scratches, cracks, missing parts)", _get(ticket, "intake_condition"))
         y -= 20
         c.setFillColor(GRAY); c.setFont(F, 8.8)
         for ln in [l.strip().replace("{phone}", SHOP["phone"]) for l in SHOP["dropoff_note"].split("\n") if l.strip()][:3]:
@@ -342,8 +342,16 @@ def _receipt_half(c, top, title, copy_label, ticket, customer, devices, mode, pa
         y -= 20
     # signatures
     y -= 10
+    signed_at = _get(ticket, "intake_signed_at") if mode == "dropoff" and signature else ""
     _field(c, x0, y, 210, "Customer signature" if mode == "pickup" else "Customer signature (if present)")
-    _field(c, x0 + 236, y, 110, "Date")
+    if signed_at:
+        try:
+            c.drawImage(signature, x0 + 2, y + 1, width=200, height=34, preserveAspectRatio=True, anchor="sw", mask="auto")
+        except Exception:
+            pass
+        c.setFillColor(GRAY); c.setFont(F, 7.5)
+        c.drawString(x0, y - 9, "Signed on screen by %s" % (_get(ticket, "intake_signed_name") or "the customer"))
+    _field(c, x0 + 236, y, 110, "Date", signed_at[:10] if signed_at else "")
     _field(c, x0 + 372, y, w - 372, "Received by" if mode == "dropoff" else "Released by")
     if mode == "pickup":
         c.setFillColor(GRAY); c.setFont(F, 8.8); c.drawString(x0, y - 14, "By signing, the customer confirms they received the items listed above.")
@@ -354,14 +362,23 @@ def _cut_line(c, y):
     c.setFillColor(GRAY); c.setFont(F, 8); c.drawCentredString(W / 2, y + 3, "cut or fold here")
 
 
-def dropoff_receipt(ticket, customer, devices, copies="both"):
+def _get(row, key):
+    """Read a column that may not exist (blank forms, older rows)."""
+    try:
+        v = row[key]
+    except (KeyError, IndexError, TypeError):
+        return ""
+    return v or ""
+
+
+def dropoff_receipt(ticket, customer, devices, copies="both", signature=None):
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=letter)
     c.setTitle("Drop-Off Receipt - %s" % (ticket["number"] or "blank")); c.setAuthor(SHOP["name"])
-    _receipt_half(c, H, "Drop-Off Receipt", "Customer copy", ticket, customer, devices, "dropoff")
+    _receipt_half(c, H, "Drop-Off Receipt", "Customer copy", ticket, customer, devices, "dropoff", signature=signature)
     if copies == "both":
         _cut_line(c, H / 2 + 2)
-        _receipt_half(c, H / 2, "Drop-Off Receipt", "Shop copy", ticket, customer, devices, "dropoff")
+        _receipt_half(c, H / 2, "Drop-Off Receipt", "Shop copy", ticket, customer, devices, "dropoff", signature=signature)
     c.showPage(); c.save()
     return buf.getvalue()
 
@@ -374,5 +391,68 @@ def pickup_receipt(ticket, customer, devices, parts=None, copies="both"):
     if copies == "both":
         _cut_line(c, H / 2 + 2)
         _receipt_half(c, H / 2, "Pick-Up Receipt", "Shop copy", ticket, customer, devices, "pickup", parts)
+    c.showPage(); c.save()
+    return buf.getvalue()
+
+
+def estimate(ticket, customer, devices, lines, totals, note=""):
+    """One-page estimate from the ticket's quote lines."""
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=letter)
+    c.setTitle("Estimate - %s" % (ticket["number"] or "")); c.setAuthor(SHOP["name"])
+    y = _header(c, "Estimate", SHOP["area"])
+    _field(c, M, y, 150, "Ticket", ticket["number"])
+    _field(c, M + 170, y, 200, "Customer", customer["name"])
+    _field(c, M + 390, y, CW - 390, "Phone", customer["phone"] or customer["email"] or "")
+    y -= 30
+    devs = ", ".join(" ".join(p for p in [d["device_type"], d["make_model"]] if p) for d in (devices or [])[:3])
+    _field(c, M, y, CW * 0.62, "Device", devs)
+    from datetime import date
+    _field(c, M + CW * 0.62 + 20, y, CW * 0.38 - 20, "Date", date.today().strftime("%b %d, %Y"))
+    y -= 40
+    _heading(c, y, "Work and parts")
+    y -= 24
+    cols = [M, M + CW - 250, M + CW - 175, M + CW - 85]
+    c.setFillColor(PALE); c.rect(M, y - 6, CW, 20, stroke=0, fill=1)
+    c.setFillColor(NAVY); c.setFont(FB, 9.5)
+    c.drawString(cols[0] + 6, y, "Description"); c.drawRightString(cols[1] + 50, y, "Qty")
+    c.drawRightString(cols[2] + 70, y, "Price"); c.drawRightString(M + CW - 6, y, "Amount")
+    y -= 22
+    c.setFont(F, 10)
+    for ln in lines[:22]:
+        amt = ln["qty"] * ln["unit_price"]
+        desc = ln["description"] + ("" if ln["taxable"] else "  (not taxed)")
+        while c.stringWidth(desc, F, 10) > cols[1] - cols[0] - 20 and len(desc) > 4:
+            desc = desc[:-2]
+        c.setFillColor(NAVY)
+        c.drawString(cols[0] + 6, y, desc)
+        q = ("%g" % ln["qty"])
+        c.drawRightString(cols[1] + 50, y, q)
+        c.drawRightString(cols[2] + 70, y, "$%.2f" % ln["unit_price"])
+        c.drawRightString(M + CW - 6, y, "$%.2f" % amt)
+        _line(c, M, y - 6, CW)
+        y -= 20
+    if len(lines) > 22:
+        c.setFillColor(GRAY); c.drawString(M + 6, y, "+ %d more line(s), listed on the ticket" % (len(lines) - 22)); y -= 18
+    y -= 6
+    def total_row(label, value, bold=False):
+        nonlocal y
+        c.setFillColor(NAVY); c.setFont(FB if bold else F, 12 if bold else 10.5)
+        c.drawRightString(M + CW - 110, y, label); c.drawRightString(M + CW - 6, y, value)
+        y -= 18 if not bold else 22
+    total_row("Subtotal", "$%.2f" % totals["subtotal"])
+    rate = ("%g" % totals["rate"])
+    total_row("Sales tax (%s%% on $%.2f)" % (rate, totals["taxable"]), "$%.2f" % totals["tax"])
+    c.setStrokeColor(ORANGE); c.setLineWidth(1.6); c.line(M + CW - 260, y + 12, M + CW, y + 12)
+    total_row("Estimated total", "$%.2f" % totals["total"], bold=True)
+    y -= 10
+    if note:
+        c.setFillColor(GRAY); c.setFont(F, 9.5)
+        for ln in _wrap(c, note, F, 9.5, CW)[:4]:
+            c.drawString(M, y, ln); y -= 13
+    y -= 18
+    _field(c, M, y, 250, "Approved by (customer)")
+    _field(c, M + 280, y, 120, "Date")
+    _footer(c)
     c.showPage(); c.save()
     return buf.getvalue()

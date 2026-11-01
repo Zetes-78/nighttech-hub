@@ -1,7 +1,9 @@
 """Night Tech Hub: customers, tickets, devices, files and know-how for Night Tech Solutions."""
+import base64
 import csv
 import hmac
 import io
+import json
 import os
 import re
 import secrets
@@ -11,6 +13,7 @@ import uuid
 import zipfile
 from datetime import datetime, timedelta
 from functools import wraps
+from urllib.parse import quote as urlquote
 
 from flask import (Flask, Response, abort, flash, g, redirect, render_template, request,
                    send_file, session, url_for)
@@ -446,8 +449,13 @@ def ticket_view(tid):
     users = d.execute("SELECT id, display_name FROM users WHERE active=1 ORDER BY display_name").fetchall()
     parts_total = sum((p["cost"] or 0) * p["qty"] for p in parts)
     minutes = sum(x["minutes"] for x in times)
+    lines, totals = quote_totals(tid)
+    reports = d.execute("SELECT * FROM recovery_reports WHERE ticket_id=? ORDER BY id DESC", (tid,)).fetchall()
+    sig = d.execute("SELECT id FROM attachments WHERE ticket_id=? AND stored_name=?", (tid, t["intake_signature"])).fetchone() if t["intake_signature"] else None
     return render_template("ticket.html", t=t, c=c, devs=devs, notes=notes, events=events, parts=parts, times=times, files=files,
-                           users=users, parts_total=parts_total, minutes=minutes)
+                           users=users, parts_total=parts_total, minutes=minutes, qlines=lines, qt=totals, reports=reports,
+                           texts=customer_texts(t, c, devs, totals), sig_file=sig["id"] if sig else None,
+                           tax_rate=tax_rate())
 
 
 @app.route("/tickets/<int:tid>/status", methods=["POST"])
@@ -585,6 +593,233 @@ def device_update(tid, did):
     d.execute("UPDATE tickets SET updated_at=? WHERE id=?", (db.now(), tid)); d.commit()
     flash("Device saved.", "ok")
     return redirect(url_for("ticket_view", tid=tid) + "#devices")
+
+
+# ---------------------------------------------------------------- intake check-in
+SIG_PREFIX = "data:image/png;base64,"
+
+
+@app.route("/tickets/<int:tid>/intake", methods=["POST"])
+def ticket_intake(tid):
+    d = get_db(); t = get_ticket_or_404(tid)
+    f = request.form
+    condition, accessories = clean(f.get("intake_condition"), 1000), clean(f.get("intake_accessories"), 500)
+    signed_name = clean(f.get("intake_signed_name"), 80)
+    sig_data = f.get("signature", "")
+    changes = []
+    if condition != (t["intake_condition"] or ""):
+        changes.append("condition")
+    if accessories != (t["intake_accessories"] or ""):
+        changes.append("accessories")
+    d.execute("UPDATE tickets SET intake_condition=?, intake_accessories=?, updated_at=? WHERE id=?",
+              (condition, accessories, db.now(), tid))
+    if sig_data:
+        if not signed_name:
+            flash("Type the customer's name next to their signature.", "error")
+            d.commit()
+            return redirect(url_for("ticket_view", tid=tid) + "#intake")
+        if not sig_data.startswith(SIG_PREFIX) or len(sig_data) > 700_000:
+            abort(400, "The signature didn't come through. Clear it and sign again.")
+        try:
+            png = base64.b64decode(sig_data[len(SIG_PREFIX):], validate=True)
+        except ValueError:
+            abort(400, "The signature didn't come through. Clear it and sign again.")
+        if not png.startswith(b"\x89PNG"):
+            abort(400, "The signature didn't come through. Clear it and sign again.")
+        stored = uuid.uuid4().hex + ".png"
+        with open(os.path.join(db.UPLOADS, stored), "wb") as fh:
+            fh.write(png)
+        when = db.now()
+        d.execute("INSERT INTO attachments(ticket_id,customer_id,category,description,original_name,stored_name,content_type,size,uploaded_by,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                  (tid, t["customer_id"], "Signature", "Drop-off signature: " + signed_name, "signature-%s.png" % (t["number"] or tid),
+                   stored, "image/png", len(png), g.user["id"], when))
+        d.execute("UPDATE tickets SET intake_signed_name=?, intake_signed_at=?, intake_signature=?, intake_by=? WHERE id=?",
+                  (signed_name, when, stored, g.user["id"], tid))
+        log_event(tid, "Drop-off signed", "Signed by %s, received by %s" % (signed_name, g.user["display_name"]))
+        if t["status"] == "New":
+            d.execute("UPDATE tickets SET status='Checked in' WHERE id=?", (tid,))
+            log_event(tid, "Status changed", "New to Checked in")
+    if changes:
+        log_event(tid, "Intake updated", ", ".join(changes))
+    d.commit()
+    flash("Check-in saved." + (" Signature recorded." if sig_data else ""), "ok")
+    return redirect(url_for("ticket_view", tid=tid) + "#intake")
+
+
+def signature_path(t):
+    if not t or not t["intake_signature"]:
+        return None
+    p = os.path.join(db.UPLOADS, os.path.basename(t["intake_signature"]))
+    return p if os.path.exists(p) else None
+
+
+# ---------------------------------------------------------------- quote builder
+def tax_rate():
+    try:
+        r = float(shop_settings().get("tax_rate") or 0)
+        return r if 0 <= r <= 20 else 0.0
+    except ValueError:
+        return 0.0
+
+
+def _cents(x):
+    return float(int(x * 100 + (0.5 if x >= 0 else -0.5))) / 100
+
+
+def quote_totals(tid):
+    lines = get_db().execute("SELECT * FROM quote_lines WHERE ticket_id=? ORDER BY id", (tid,)).fetchall()
+    rate = tax_rate()
+    subtotal = sum(_cents(l["qty"] * l["unit_price"]) for l in lines)
+    taxable = sum(_cents(l["qty"] * l["unit_price"]) for l in lines if l["taxable"])
+    tax = _cents(taxable * rate / 100)
+    return lines, {"subtotal": _cents(subtotal), "taxable": _cents(taxable), "tax": tax, "total": _cents(subtotal + tax), "rate": rate}
+
+
+def _sync_quote(tid, reason):
+    lines, tot = quote_totals(tid)
+    d = get_db()
+    old = d.execute("SELECT quote_amount FROM tickets WHERE id=?", (tid,)).fetchone()["quote_amount"]
+    new = tot["total"] if lines else None
+    d.execute("UPDATE tickets SET quote_amount=?, updated_at=? WHERE id=?", (new, db.now(), tid))
+    log_event(tid, "Quote changed", "%s (%s to %s)" % (reason, money(old) or "none", money(new) or "none"))
+
+
+@app.route("/tickets/<int:tid>/quote/add", methods=["POST"])
+def quote_add(tid):
+    d = get_db(); get_ticket_or_404(tid)
+    f = request.form
+    desc = clean(f.get("description"), 160)
+    try:
+        qty = float(f.get("qty") or 1)
+        price = float((f.get("unit_price") or "").replace("$", "").replace(",", ""))
+        if not (0 < qty <= 999) or not (-100000 <= price <= 100000):
+            raise ValueError
+    except ValueError:
+        flash("Enter the quantity and price as numbers, like 1 and 50.", "error")
+        return redirect(url_for("ticket_view", tid=tid) + "#quote")
+    if not desc:
+        flash("Describe the line, for example \"PC cleanup\" or \"Replacement HDMI port\".", "error")
+        return redirect(url_for("ticket_view", tid=tid) + "#quote")
+    d.execute("INSERT INTO quote_lines(ticket_id,description,qty,unit_price,taxable,created_at) VALUES (?,?,?,?,?,?)",
+              (tid, desc, qty, _cents(price), 1 if f.get("taxable") else 0, db.now()))
+    _sync_quote(tid, "Added " + desc)
+    d.commit()
+    return redirect(url_for("ticket_view", tid=tid) + "#quote")
+
+
+@app.route("/tickets/<int:tid>/quote/<int:lid>/delete", methods=["POST"])
+def quote_delete(tid, lid):
+    d = get_db(); get_ticket_or_404(tid)
+    row = d.execute("SELECT * FROM quote_lines WHERE id=? AND ticket_id=?", (lid, tid)).fetchone() or abort(404)
+    d.execute("DELETE FROM quote_lines WHERE id=?", (lid,))
+    _sync_quote(tid, "Removed " + row["description"])
+    d.commit()
+    return redirect(url_for("ticket_view", tid=tid) + "#quote")
+
+
+@app.route("/tickets/<int:tid>/estimate.pdf")
+def pdf_estimate(tid):
+    configure_pdfs()
+    t, c, devs = ticket_bundle(tid)
+    lines, tot = quote_totals(tid)
+    if not lines:
+        flash("Add at least one line to the quote first.", "error")
+        return redirect(url_for("ticket_view", tid=tid) + "#quote")
+    data = pdfs.estimate(t, c, devs, lines, tot, shop_settings().get("estimate_note", ""))
+    log_event(tid, "Paperwork printed", "Estimate (%s)" % money(tot["total"])); get_db().commit()
+    return Response(data, mimetype="application/pdf", headers={"Content-Disposition": 'inline; filename="estimate-%s.pdf"' % t["number"]})
+
+
+# ---------------------------------------------------------------- customer texts
+def _fill(template, values):
+    out = template or ""
+    for k, v in values.items():
+        out = out.replace("{%s}" % k, v)
+    return out
+
+
+def customer_texts(t, c, devs, totals=None):
+    cfg = shop_settings()
+    name = (c["name"] or "").strip()
+    dev = next((" ".join(p for p in [x["make_model"]] if p) or x["device_type"] for x in devs if (x["make_model"] or x["device_type"])), "") or "device"
+    q = t["quote_amount"]
+    values = {"first": name.split()[0] if name else "there", "name": name or "there", "shop": cfg["shop_name"], "phone": cfg["shop_phone"],
+              "ticket": t["number"] or "", "device": dev, "quote": money(q) if q is not None else "(estimate not set)",
+              "paylink": (" You can pay here: " + t["invoice_link"]) if t["invoice_link"] else "", "status": t["status"]}
+    phone = re.sub(r"\D", "", c["phone"] or "")
+    if len(phone) == 10:
+        phone = "1" + phone
+    out = []
+    for key, label in db.TEXT_TEMPLATES:
+        body = _fill(cfg.get(key) or db.DEFAULT_SETTINGS.get(key, ""), values).strip()
+        out.append({"key": key, "label": label, "body": body,
+                    "sms": ("sms:+%s?&body=%s" % (phone, urlquote(body))) if len(phone) == 11 else ""})
+    return out
+
+
+@app.route("/tickets/<int:tid>/texted", methods=["POST"])
+def ticket_texted(tid):
+    d = get_db(); t = get_ticket_or_404(tid)
+    label = dict(db.TEXT_TEMPLATES).get(request.form.get("template", ""), "Message")
+    body = clean(request.form.get("body"), 600)
+    log_event(tid, "Customer texted", "%s: %s" % (label, body))
+    d.execute("UPDATE tickets SET updated_at=? WHERE id=?", (db.now(), tid)); d.commit()
+    flash("Logged on the ticket.", "ok")
+    return redirect(url_for("ticket_view", tid=tid) + "#texts")
+
+
+# ---------------------------------------------------------------- Night Tech Recovery reports
+@app.route("/tickets/<int:tid>/recovery", methods=["POST"])
+def ticket_recovery(tid):
+    d = get_db(); t = get_ticket_or_404(tid)
+    up = request.files.get("file")
+    if not up or not up.filename.lower().endswith(".json"):
+        flash("Choose the Night Tech Recovery report that ends in -report.json.", "error")
+        return redirect(url_for("ticket_view", tid=tid) + "#recovery")
+    raw = up.stream.read(2_000_000)
+    try:
+        rep = json.loads(raw.decode("utf-8-sig"))
+        if not isinstance(rep, dict) or rep.get("tool") != "Night Tech Recovery":
+            raise ValueError
+        src = rep.get("source") or {}
+        row = dict(case_name=str(rep.get("caseName") or "")[:120], status=str(rep.get("status") or "")[:40],
+                   source=str(src.get("description") or "")[:200], serial=str(src.get("serial") or "")[:80],
+                   bytes_total=int(src.get("length") or 0), bytes_good=int(rep.get("bytesGood") or 0),
+                   bytes_bad=int(rep.get("bytesBad") or 0), bad_sectors=int(rep.get("badSectorCount") or 0),
+                   sha256=str(rep.get("imageSha256") or "")[:64], finished=str(rep.get("finished") or "")[:40],
+                   tool_version=str(rep.get("toolVersion") or "")[:20])
+    except (ValueError, TypeError, AttributeError):
+        flash("That file isn't a Night Tech Recovery report.", "error")
+        return redirect(url_for("ticket_view", tid=tid) + "#recovery")
+    up.stream.seek(0)
+    fid, err = save_upload(up, tid, t["customer_id"], "Recovery report", "Night Tech Recovery report: " + (row["case_name"] or up.filename))
+    if err:
+        flash(err, "error")
+        return redirect(url_for("ticket_view", tid=tid) + "#recovery")
+    d.execute("INSERT INTO recovery_reports(ticket_id,attachment_id,case_name,status,source,serial,bytes_total,bytes_good,bytes_bad,bad_sectors,sha256,finished,tool_version,created_at) "
+              "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+              (tid, fid, row["case_name"], row["status"], row["source"], row["serial"], row["bytes_total"], row["bytes_good"],
+               row["bytes_bad"], row["bad_sectors"], row["sha256"], row["finished"], row["tool_version"], db.now()))
+    log_event(tid, "Recovery image recorded", "%s: %s, %d unreadable sector(s)%s" % (
+        row["source"] or "drive", row["status"], row["bad_sectors"], (", SHA-256 " + row["sha256"][:16] + "...") if row["sha256"] else ""))
+    serials = {(x["serial"] or "").strip().lower() for x in ticket_bundle(tid)[2] if x["serial"]}
+    d.commit()
+    if row["serial"] and serials and row["serial"].strip().lower() not in serials:
+        flash("Report added, but its drive serial (%s) doesn't match any device on this ticket. Double-check it's the right ticket." % row["serial"], "error")
+    else:
+        flash("Recovery report added to the ticket.", "ok")
+    return redirect(url_for("ticket_view", tid=tid) + "#recovery")
+
+
+def human_bytes(n):
+    n = float(n or 0)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1000 or unit == "TB":
+            return ("%d %s" % (n, unit)) if unit == "B" else ("%.2f %s" % (n, unit)).replace(".00 ", " ")
+        n /= 1000
+
+
+app.jinja_env.filters["bytes"] = human_bytes
 
 
 # ---------------------------------------------------------------- paperwork
@@ -786,7 +1021,7 @@ def render_form(kind, tid=None, copies="both"):
         t, c, devs = ticket_bundle(tid)
         parts = get_db().execute("SELECT * FROM parts WHERE ticket_id=? ORDER BY id", (tid,)).fetchall()
     if kind == "dropoff-receipt":
-        data = pdfs.dropoff_receipt(t, c, devs, copies)
+        data = pdfs.dropoff_receipt(t, c, devs, copies, signature_path(t) if tid is not None else None)
     elif kind == "pickup-receipt":
         data = pdfs.pickup_receipt(t, c, devs, parts, copies)
     elif kind == "release":
@@ -829,7 +1064,7 @@ def pdf_pickup_receipt(tid):
 
 # ---------------------------------------------------------------- files
 MAGIC = {"jpg": (b"\xff\xd8\xff",), "jpeg": (b"\xff\xd8\xff",), "png": (b"\x89PNG",), "gif": (b"GIF8",), "pdf": (b"%PDF",),
-         "webp": (b"RIFF",), "docx": (b"PK",), "xlsx": (b"PK",)}
+         "webp": (b"RIFF",), "docx": (b"PK",), "xlsx": (b"PK",), "json": (b"{", b"\xef\xbb\xbf{", b"[")}
 INLINE = {"jpg", "jpeg", "png", "gif", "webp"}
 
 
@@ -856,12 +1091,21 @@ def save_upload(file, ticket_id=None, customer_id=None, category="General", desc
 @app.route("/tickets/<int:tid>/upload", methods=["POST"])
 def ticket_upload(tid):
     t = get_ticket_or_404(tid)
-    fid, err = save_upload(request.files.get("file"), tid, t["customer_id"], request.form.get("category", "Photo"), request.form.get("description", ""))
-    if err:
-        flash(err, "error")
-    else:
-        log_event(tid, "File added", request.files["file"].filename[:120]); get_db().commit(); flash("File added.", "ok")
-    return redirect(url_for("ticket_view", tid=tid) + "#files")
+    files_in = [f for f in request.files.getlist("file") if f and f.filename][:20]
+    if not files_in:
+        flash("Choose a file first.", "error")
+    added = 0
+    for up in files_in:
+        fid, err = save_upload(up, tid, t["customer_id"], request.form.get("category", "Photo"), request.form.get("description", ""))
+        if err:
+            flash("%s: %s" % (up.filename[:80], err), "error")
+        else:
+            log_event(tid, "File added", up.filename[:120]); added += 1
+    get_db().commit()
+    if added:
+        flash("%d file(s) added." % added, "ok")
+    back = "#intake" if request.form.get("back") == "intake" else "#files"
+    return redirect(url_for("ticket_view", tid=tid) + back)
 
 
 @app.route("/files", methods=["GET", "POST"])
@@ -970,7 +1214,8 @@ def wiki_delete(slug):
 # ---------------------------------------------------------------- settings, users, backup, export
 @app.route("/settings")
 def settings():
-    return render_template("settings.html", cfg=shop_settings(), svc_text="\n".join(services_list()), loc_text="\n".join(locations_list()))
+    return render_template("settings.html", cfg=shop_settings(), svc_text="\n".join(services_list()), loc_text="\n".join(locations_list()),
+                           TEXT_TEMPLATES=db.TEXT_TEMPLATES, TEXT_FIELDS=db.TEXT_FIELDS)
 
 
 def _save_settings(pairs):
@@ -1016,6 +1261,25 @@ def settings_receipt():
     _save_settings({"dropoff_note": note})
     flash("Receipt wording saved.", "ok")
     return redirect(url_for("settings") + "#receipt")
+
+
+@app.route("/settings/texts", methods=["POST"])
+@owner_required
+def settings_texts():
+    f = request.form
+    try:
+        rate = float((f.get("tax_rate") or "0").replace("%", ""))
+        if not 0 <= rate <= 20:
+            raise ValueError
+    except ValueError:
+        flash("Enter the sales tax rate as a percentage, like 6 or 7.", "error")
+        return redirect(url_for("settings") + "#texts")
+    pairs = {"tax_rate": ("%.3f" % rate).rstrip("0").rstrip("."), "estimate_note": clean(f.get("estimate_note"), 300)}
+    for key, _ in db.TEXT_TEMPLATES:
+        pairs[key] = clean(f.get(key), 600) or db.DEFAULT_SETTINGS[key]
+    _save_settings(pairs)
+    flash("Quotes and customer texts saved.", "ok")
+    return redirect(url_for("settings") + "#texts")
 
 
 @app.route("/team")

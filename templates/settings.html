@@ -6,7 +6,7 @@
 {% if g.user['role'] == 'owner' %}<a class="btn primary" href="{{ url_for('team') }}">Team: add Carin or others</a>{% endif %}</div>
 
 {% if g.user['role'] == 'owner' %}
-<nav class="subnav"><a href="#shop">Shop details</a><a href="#lists">Services and locations</a><a href="#receipt">Receipt wording</a><a href="#backup">Backups</a><a href="#account">Your password</a><a href="{{ url_for('team') }}">Team</a></nav>
+<nav class="subnav"><a href="#shop">Shop details</a><a href="#lists">Services and locations</a><a href="#receipt">Receipt wording</a><a href="#texts">Quotes and texts</a><a href="#backup">Backups</a><a href="#account">Your password</a><a href="{{ url_for('team') }}">Team</a></nav>
 
 <section class="card" id="shop">
   <h2>Shop details</h2>
@@ -40,6 +40,22 @@
     <label>Notes printed at the bottom of the drop-off receipt (up to 3 lines)<textarea name="dropoff_note" rows="4">{{ cfg.dropoff_note }}</textarea></label>
     <p class="tiny muted">Use <code>{phone}</code> to insert your phone number automatically. Don't promise warranties or timelines here unless you're sure you'll keep them.</p>
     <button class="btn primary" type="submit">Save wording</button>
+  </form>
+</section>
+
+<section class="card" id="texts">
+  <h2>Quotes and customer texts</h2>
+  <form method="post" action="{{ url_for('settings_texts') }}">{{ csrf() }}
+    <div class="two">
+      <label>Sales tax rate (%)<input name="tax_rate" inputmode="decimal" value="{{ cfg.tax_rate }}" maxlength="6"></label>
+      <label>Note printed on estimates<input name="estimate_note" value="{{ cfg.estimate_note }}" maxlength="300"></label>
+    </div>
+    <p class="tiny muted">Tax applies to quote lines marked "Taxable". Confirm your rate and which services are taxable with the SC Department of Revenue or your accountant; local taxes can add to the state rate.</p>
+    {% for key, label in TEXT_TEMPLATES %}
+    <label>{{ label }}<textarea name="{{ key }}" rows="2" maxlength="600">{{ cfg[key] }}</textarea></label>
+    {% endfor %}
+    <p class="tiny muted">Fill-ins: {% for f in TEXT_FIELDS %}<code>{{ '{' ~ f ~ '}' }}</code> {% endfor %}. <code>{paylink}</code> adds the ticket's Square link when there is one.</p>
+    <button class="btn primary" type="submit">Save quotes and texts</button>
   </form>
 </section>
 

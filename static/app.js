@@ -63,6 +63,53 @@ document.addEventListener("DOMContentLoaded", function () {
     pw.value = out;
   });
 
+  // Copy a value to the clipboard (quote total)
+  var copyText = function (text, btn) {
+    var done = function () { var o = btn.textContent; btn.textContent = "Copied"; setTimeout(function () { btn.textContent = o; }, 1500); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function () { window.prompt("Copy this:", text); });
+    } else { window.prompt("Copy this:", text); }
+  };
+  document.querySelectorAll("[data-copy]").forEach(function (b) {
+    b.addEventListener("click", function () { copyText(b.getAttribute("data-copy"), b); });
+  });
+
+  // Customer texts: switch template, copy, keep the sms: link in step
+  document.querySelectorAll("form.textpick").forEach(function (f) {
+    var pick = f.querySelector("[data-textpick]"), body = f.querySelector("[data-textbody]"), sms = f.querySelector("[data-smslink]");
+    var syncSms = function () {
+      if (!sms) return;
+      var base = (pick.options[pick.selectedIndex].getAttribute("data-sms") || "").split("?")[0];
+      if (base) sms.href = base + "?&body=" + encodeURIComponent(body.value);
+    };
+    if (pick && body) {
+      pick.addEventListener("change", function () { body.value = pick.options[pick.selectedIndex].getAttribute("data-body") || ""; syncSms(); });
+      body.addEventListener("input", syncSms);
+    }
+    var cp = f.querySelector("[data-copytext]");
+    if (cp && body) cp.addEventListener("click", function () { copyText(body.value, cp); });
+  });
+
+  // Signature pad (check-in)
+  document.querySelectorAll("canvas.sigpad").forEach(function (cv) {
+    var form = cv.closest("form"), out = form.querySelector(".sigdata"), ctx = cv.getContext("2d"), drawing = false, inked = false;
+    ctx.lineWidth = 2.4; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.strokeStyle = "#1a365d";
+    var pos = function (e) {
+      var r = cv.getBoundingClientRect();
+      return { x: (e.clientX - r.left) * cv.width / r.width, y: (e.clientY - r.top) * cv.height / r.height };
+    };
+    cv.addEventListener("pointerdown", function (e) {
+      drawing = true; inked = true; cv.setPointerCapture(e.pointerId);
+      var p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + 0.1, p.y + 0.1); ctx.stroke(); e.preventDefault();
+    });
+    cv.addEventListener("pointermove", function (e) { if (!drawing) return; var p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); });
+    var stop = function () { drawing = false; };
+    cv.addEventListener("pointerup", stop); cv.addEventListener("pointercancel", stop); cv.addEventListener("pointerleave", stop);
+    var clr = form.querySelector("[data-sigclear]");
+    if (clr) clr.addEventListener("click", function () { ctx.clearRect(0, 0, cv.width, cv.height); inked = false; out.value = ""; });
+    form.addEventListener("submit", function () { out.value = inked ? cv.toDataURL("image/png") : ""; });
+  });
+
   // Night sky on the sign-in screens
   var cv = document.querySelector("canvas.sky");
   if (cv && cv.getContext) {

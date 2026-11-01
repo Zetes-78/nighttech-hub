@@ -27,6 +27,114 @@
   </form>
 </section>
 
+<section class="card" id="intake">
+  <h2>Check-in {% if t['intake_signed_at'] %}<span class="badge st-completed">Signed</span>{% endif %}</h2>
+  <form method="post" action="{{ url_for('ticket_upload', tid=t['id']) }}" enctype="multipart/form-data" class="inlineform">{{ csrf() }}
+    <input type="hidden" name="back" value="intake"><input type="hidden" name="category" value="Photo">
+    <input type="hidden" name="description" value="Check-in photo">
+    <label class="filepick">Check-in photos<input type="file" name="file" accept="image/*" capture="environment" multiple required></label>
+    <button class="btn small" type="submit">Add photos</button>
+    <span class="tiny muted">Take a photo of every side, the screen and the ports. You can pick several at once.</span>
+  </form>
+  {% set photos = files|selectattr('category', 'equalto', 'Photo')|list %}
+  {% if photos %}<div class="thumbs">{% for f in photos[:12] %}<a href="{{ url_for('file_download', fid=f['id']) }}" target="_blank"><img src="{{ url_for('file_download', fid=f['id']) }}" alt="{{ f['original_name'] }}" loading="lazy"></a>{% endfor %}</div>{% endif %}
+
+  <form method="post" action="{{ url_for('ticket_intake', tid=t['id']) }}" id="intakeform">{{ csrf() }}
+    <div class="devgrid">
+      <label class="wide">Condition when received<textarea name="intake_condition" rows="2" maxlength="1000" placeholder="Scratches, cracks, dents, missing screws or keys, liquid damage">{{ t['intake_condition'] or '' }}</textarea></label>
+      <label class="wide">Accessories left with it<input name="intake_accessories" value="{{ t['intake_accessories'] or '' }}" maxlength="500" placeholder="Charger, case, cables, controller, stylus"></label>
+    </div>
+    {% if t['intake_signed_at'] %}
+      <p class="muted">Signed by <b>{{ t['intake_signed_name'] }}</b> on {{ t['intake_signed_at']|dt }}.
+      {% if sig_file %}<a href="{{ url_for('file_download', fid=sig_file) }}" target="_blank">View signature</a>{% endif %}
+      It prints on the drop-off receipt.</p>
+      <details><summary>Sign again</summary>
+    {% endif %}
+    <div class="sigbox">
+      <p class="tiny muted">The customer signs below to confirm what they left and its condition. Use a finger, pen or mouse.</p>
+      <canvas class="sigpad" width="600" height="160" aria-label="Signature pad"></canvas>
+      <input type="hidden" name="signature" class="sigdata">
+      <div class="inlineform">
+        <input name="intake_signed_name" placeholder="Customer's name as signed" maxlength="80" value="{{ c['name'] if not t['intake_signed_at'] else '' }}">
+        <button class="btn small" type="button" data-sigclear>Clear</button>
+      </div>
+    </div>
+    {% if t['intake_signed_at'] %}</details>{% endif %}
+    <button class="btn primary" type="submit">Save check-in</button>
+    <a class="btn" href="{{ url_for('pdf_dropoff_receipt', tid=t['id']) }}" target="_blank">Print drop-off receipt</a>
+  </form>
+</section>
+
+<div class="grid2">
+<section class="card" id="quote">
+  <h2>Quote {% if qlines %}<span class="muted">{{ qt.total|money }}</span>{% endif %}</h2>
+  {% if qlines %}
+  <table class="qtable">
+    <thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Amount</th><th></th></tr></thead>
+    <tbody>{% for l in qlines %}<tr>
+      <td>{{ l['description'] }}{% if not l['taxable'] %} <span class="tiny muted">(not taxed)</span>{% endif %}</td>
+      <td class="num">{{ '%g'|format(l['qty']) }}</td><td class="num">{{ l['unit_price']|money }}</td><td class="num">{{ (l['qty'] * l['unit_price'])|money }}</td>
+      <td><form method="post" action="{{ url_for('quote_delete', tid=t['id'], lid=l['id']) }}">{{ csrf() }}<button class="btn small" type="submit" title="Remove line" aria-label="Remove {{ l['description'] }}">&times;</button></form></td>
+    </tr>{% endfor %}</tbody>
+    <tfoot>
+      <tr><td colspan="3" class="num">Subtotal</td><td class="num">{{ qt.subtotal|money }}</td><td></td></tr>
+      <tr><td colspan="3" class="num">Sales tax ({{ '%g'|format(qt.rate) }}% on {{ qt.taxable|money }})</td><td class="num">{{ qt.tax|money }}</td><td></td></tr>
+      <tr><td colspan="3" class="num"><b>Total</b></td><td class="num"><b>{{ qt.total|money }}</b></td><td></td></tr>
+    </tfoot>
+  </table>
+  {% else %}<p class="muted">No quote yet. Add labor and parts below; the total and tax are worked out for you.</p>{% endif %}
+  <form method="post" action="{{ url_for('quote_add', tid=t['id']) }}" class="inlineform">{{ csrf() }}
+    <input name="description" placeholder="Labor or part, e.g. PC cleanup" maxlength="160" required>
+    <input name="qty" type="number" step="any" min="0.01" value="1" class="short" aria-label="Quantity">
+    <input name="unit_price" inputmode="decimal" placeholder="Price" class="short" required aria-label="Price">
+    <label class="check"><input type="checkbox" name="taxable" value="1" checked> Taxable</label>
+    <button class="btn small primary" type="submit">Add line</button>
+  </form>
+  {% if qlines %}
+  <p><a class="btn" href="{{ url_for('pdf_estimate', tid=t['id']) }}" target="_blank">Print estimate</a>
+  <a class="btn" href="https://app.squareup.com/dashboard/" target="_blank" rel="noopener">Open Square</a>
+  <button class="btn" type="button" data-copy="{{ '%.2f'|format(qt.total) }}">Copy total</button></p>
+  <p class="tiny muted">The ticket's quote is set to this total automatically. Make the Square invoice or payment link for {{ qt.total|money }}, then paste the link under Details so it goes into the "Ready for pickup" text.</p>
+  {% endif %}
+</section>
+
+<section class="card" id="texts">
+  <h2>Text the customer</h2>
+  {% if not c['ok_to_text'] %}<p class="flash error">This customer hasn't said it's OK to text. Call instead, or update their record first.</p>{% endif %}
+  <form method="post" action="{{ url_for('ticket_texted', tid=t['id']) }}" class="textpick">{{ csrf() }}
+    <label>Message
+      <select name="template" data-textpick>
+        {% for x in texts %}<option value="{{ x.key }}" data-body="{{ x.body }}" data-sms="{{ x.sms }}">{{ x.label }}</option>{% endfor %}
+      </select></label>
+    <textarea name="body" rows="4" maxlength="600" data-textbody>{{ texts[0].body if texts }}</textarea>
+    <div class="inlineform">
+      <button class="btn small" type="button" data-copytext>Copy message</button>
+      <a class="btn small" href="https://voice.google.com/u/0/messages" target="_blank" rel="noopener">Open Google Voice</a>
+      {% if texts and texts[0].sms %}<a class="btn small" data-smslink href="{{ texts[0].sms }}">Text from this device</a>{% endif %}
+      <button class="btn small primary" type="submit">I sent it (log it)</button>
+    </div>
+    <p class="tiny muted">Paste into Google Voice and send, then click "I sent it" so it's recorded in the chain of custody. Edit the wording in Settings.</p>
+  </form>
+</section>
+</div>
+
+<section class="card" id="recovery">
+  <h2>Night Tech Recovery images</h2>
+  {% for r in reports %}
+  <div class="note">
+    <p><b>{{ r['case_name'] or 'Recovery case' }}</b> &middot; {{ r['source'] }}{% if r['serial'] %} &middot; S/N {{ r['serial'] }}{% endif %}</p>
+    <p>{{ r['status'] }} &middot; copied {{ r['bytes_good']|bytes }} of {{ r['bytes_total']|bytes }} &middot;
+      {% if r['bad_sectors'] %}<b>{{ r['bad_sectors'] }} unreadable sector(s)</b>{% else %}no unreadable sectors{% endif %}</p>
+    {% if r['sha256'] %}<p class="tiny muted">SHA-256 {{ r['sha256'] }}</p>{% endif %}
+    {% if r['attachment_id'] %}<a class="tiny" href="{{ url_for('file_download', fid=r['attachment_id']) }}">Download report</a>{% endif %}
+  </div>
+  {% else %}<p class="muted">No images recorded. After imaging a drive with Night Tech Recovery, add its <code>-report.json</code> file here.</p>{% endfor %}
+  <form method="post" action="{{ url_for('ticket_recovery', tid=t['id']) }}" enctype="multipart/form-data" class="inlineform">{{ csrf() }}
+    <input type="file" name="file" accept=".json,application/json" required>
+    <button class="btn small primary" type="submit">Add Recovery report</button>
+  </form>
+</section>
+
 <section class="card" id="devices">
   <h2>Devices ({{ devs|length }})</h2>
   {% for d in devs %}
@@ -113,7 +221,7 @@
 <section class="card" id="files">
   <h2>Files and photos</h2>
   <form method="post" action="{{ url_for('ticket_upload', tid=t['id']) }}" enctype="multipart/form-data" class="inlineform">{{ csrf() }}
-    <input type="file" name="file" required>
+    <input type="file" name="file" multiple required>
     <select name="category">{{ options(FILE_CATEGORIES, 'Photo') }}</select>
     <input name="description" placeholder="Description (optional)" maxlength="300">
     <button class="btn small primary" type="submit">Upload</button></form>

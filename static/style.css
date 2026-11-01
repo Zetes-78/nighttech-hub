@@ -147,3 +147,18 @@ label.check.inlinecheck { display: inline-flex; margin: 0 6px 0 0; font-weight: 
 fieldset.topics { border: 0; padding: 0; margin: 0 0 12px; }
 fieldset.topics legend { font-weight: 600; font-size: 14px; padding: 0; margin-bottom: 6px; }
 fieldset.topics label.check { margin: 0 0 4px; font-weight: 400; }
+
+/* Check-in, quote, texts, recovery */
+.sigbox { margin: 10px 0 14px; }
+canvas.sigpad { width: 100%; max-width: 600px; height: 160px; display: block; background: #fff; border: 1px dashed #9fb0c6;
+  border-radius: 8px; touch-action: none; cursor: crosshair; margin: 6px 0; }
+.thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.thumbs img { width: 96px; height: 96px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line, #d1d5db); }
+.filepick { display: inline-flex; flex-direction: column; gap: 4px; }
+.qtable { width: 100%; border-collapse: collapse; margin: 6px 0 12px; }
+.qtable th, .qtable td { padding: 6px 8px; border-bottom: 1px solid var(--line, #d1d5db); text-align: left; vertical-align: middle; }
+.qtable .num { text-align: right; white-space: nowrap; }
+.qtable tfoot td { border-bottom: 0; }
+.qtable form { margin: 0; }
+.textpick textarea { width: 100%; margin: 6px 0; }
+label.check { display: inline-flex; align-items: center; gap: 6px; }

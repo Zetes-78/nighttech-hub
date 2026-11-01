@@ -3,7 +3,7 @@
 
 #define AppName "Night Tech Hub"
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #define AppVersion "1.1.0"
 #endif
 #define AppPublisher "Night Tech Solutions"
 #define AppURL "https://nighttech.solutions"

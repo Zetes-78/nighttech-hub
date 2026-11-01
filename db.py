@@ -24,7 +24,19 @@ DEFAULT_SETTINGS = {
                            "New computer setup", "Website or social media", "Business IT", "Other"]),
     "storage_locations": "",
     "dropoff_note": "Please keep this receipt. Call or text {phone} with your ticket number to check on your repair.\nPhone, tablet and game console repair is drop-off only. Please back up anything important.",
+    "tax_rate": "6.0",
+    "estimate_note": "This is an estimate. The final total may change if the repair needs different work or parts.",
+    "text_received": "Hi {first}, this is {shop}. We received your {device} (ticket {ticket}). We'll text you as soon as we know more.",
+    "text_quote": "Hi {first}, your estimate for ticket {ticket} is {quote}. Reply YES to go ahead, or call or text {phone} with any questions.",
+    "text_parts": "Hi {first}, ticket {ticket} is waiting on a part. We'll let you know as soon as it arrives.",
+    "text_ready": "Hi {first}, good news: your {device} (ticket {ticket}) is ready for pickup. Text {phone} to set a pickup time.{paylink}",
+    "text_custom": "Hi {first}, this is {shop} about ticket {ticket}. ",
 }
+
+# Customer text templates: (setting key, label shown on the ticket)
+TEXT_TEMPLATES = [("text_received", "We received it"), ("text_quote", "Estimate ready"), ("text_parts", "Waiting on parts"),
+                  ("text_ready", "Ready for pickup"), ("text_custom", "Custom message")]
+TEXT_FIELDS = ["first", "name", "shop", "phone", "ticket", "device", "quote", "paylink", "status"]
 
 TOPICS = ["Deals and discounts", "Tech news and tips", "Monthly newsletter"]
 INTERESTS = ["Everything", "Home and family tech", "Gaming and consoles", "Small business IT"]
@@ -42,10 +54,11 @@ DEVICE_TYPES = ["Desktop", "Laptop", "Phone", "Tablet", "Game console", "Hard dr
 STORAGE_TYPES = ["", "Hard drive", "SSD", "Phone or tablet memory", "Other", "None"]
 DISPOSITIONS = ["", "Returned to customer", "Refurbish", "Parts", "Drive removed", "Recycled",
                 "Handed off for reuse or recycling"]
-FILE_CATEGORIES = ["General", "Photo", "Receipt", "Quote or invoice", "Certificate or release", "Vendor or recycler", "Template", "Other"]
+FILE_CATEGORIES = ["General", "Photo", "Receipt", "Quote or invoice", "Certificate or release", "Signature", "Recovery report",
+                   "Vendor or recycler", "Template", "Other"]
 ALLOWED_UPLOADS = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif",
                    "webp": "image/webp", "pdf": "application/pdf", "txt": "text/plain",
-                   "csv": "text/csv", "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                   "csv": "text/csv", "json": "application/json", "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
 
 SCHEMA = """
@@ -89,6 +102,15 @@ CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS subscribers (
   id INTEGER PRIMARY KEY, email TEXT UNIQUE NOT NULL, name TEXT, interest TEXT, source TEXT, consent_at TEXT, consent_note TEXT,
   status TEXT NOT NULL DEFAULT 'active', unsubscribed_at TEXT, created_at TEXT NOT NULL, topics TEXT);
+CREATE TABLE IF NOT EXISTS quote_lines (
+  id INTEGER PRIMARY KEY, ticket_id INTEGER NOT NULL REFERENCES tickets(id), description TEXT NOT NULL,
+  qty REAL NOT NULL DEFAULT 1, unit_price REAL NOT NULL DEFAULT 0, taxable INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS recovery_reports (
+  id INTEGER PRIMARY KEY, ticket_id INTEGER NOT NULL REFERENCES tickets(id), attachment_id INTEGER REFERENCES attachments(id),
+  case_name TEXT, status TEXT, source TEXT, serial TEXT, bytes_total INTEGER, bytes_good INTEGER, bytes_bad INTEGER,
+  bad_sectors INTEGER, sha256 TEXT, finished TEXT, tool_version TEXT, created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_quote_lines_ticket ON quote_lines(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_recovery_ticket ON recovery_reports(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_subscribers_status ON subscribers(status);
 CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
 CREATE INDEX IF NOT EXISTS idx_tickets_customer ON tickets(customer_id);
@@ -111,12 +133,51 @@ def connect():
     return conn
 
 
+# Columns added after the first release: (table, column, definition)
+ADDED_COLUMNS = [
+    ("subscribers", "topics", "TEXT"),
+    ("tickets", "intake_condition", "TEXT"),
+    ("tickets", "intake_accessories", "TEXT"),
+    ("tickets", "intake_signed_name", "TEXT"),
+    ("tickets", "intake_signed_at", "TEXT"),
+    ("tickets", "intake_signature", "TEXT"),
+    ("tickets", "intake_by", "INTEGER"),
+]
+NEW_TABLES = ["quote_lines", "recovery_reports"]
+
+
+def _pending_upgrades(conn):
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "tickets" not in tables:
+        return []  # brand-new database, nothing to upgrade
+    todo = [t for t in NEW_TABLES if t not in tables]
+    for table, col, _ in ADDED_COLUMNS:
+        if table in tables and col not in [r[1] for r in conn.execute("PRAGMA table_info(%s)" % table)]:
+            todo.append("%s.%s" % (table, col))
+    return todo
+
+
+def backup_before_upgrade(conn):
+    """Copy the whole database to data/backups before changing its structure. Returns the backup path."""
+    folder = os.path.join(DATA, "backups")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "hub-before-upgrade-%s.db" % datetime.now().strftime("%Y%m%d-%H%M%S"))
+    dest = sqlite3.connect(path)
+    try:
+        conn.backup(dest)
+    finally:
+        dest.close()
+    return path
+
+
 def init_db():
     conn = connect()
+    if _pending_upgrades(conn):
+        backup_before_upgrade(conn)
     conn.executescript(SCHEMA)
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(subscribers)")]
-    if "topics" not in cols:
-        conn.execute("ALTER TABLE subscribers ADD COLUMN topics TEXT")
+    for table, col, definition in ADDED_COLUMNS:
+        if col not in [r[1] for r in conn.execute("PRAGMA table_info(%s)" % table)]:
+            conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, col, definition))
     if conn.execute("SELECT COUNT(*) FROM wiki_pages").fetchone()[0] == 0:
         t = now()
         for slug, title, body in WIKI_SEED:
