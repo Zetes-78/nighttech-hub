@@ -2,7 +2,12 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+.build-venv/
+build/
+dist/
 data/
 *.db
 secret.key
 .env
+installer/Output/
+*.spec

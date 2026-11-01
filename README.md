@@ -10,7 +10,32 @@ It runs on your own computer. Your data stays with you.
 - A Windows, Mac or Linux computer that stays on during shop hours
 - Python 3.10 or newer (free). On Windows, download it from https://www.python.org/downloads/ and tick **Add Python to PATH**
 
-## Start it
+## Windows installer (recommended for the shop PC)
+
+`NightTechHub-Setup.exe` installs the Hub like a normal Windows program. The PC doesn't need Python.
+
+**Build the installer (once per version, on any Windows PC):**
+1. Install Python 3.10+ from https://www.python.org/downloads/ (tick **Add Python to PATH**).
+2. Install Inno Setup 6 from https://jrsoftware.org/isdl.php (or run `winget install JRSoftware.InnoSetup`).
+3. In this folder, right-click `build.ps1` and choose **Run with PowerShell**, or run:
+   `powershell -ExecutionPolicy Bypass -File .\build.ps1`
+4. The installer appears in `installer\Output\NightTechHub-Setup.exe`, with a SHA-256 checksum file next to it.
+
+**What the installer does:**
+- Installs for the current Windows user. No admin rights needed.
+- Adds **Night Tech Hub** to the Start Menu (plus a desktop shortcut if you tick the box), and a shortcut to the data folder.
+- Opening the shortcut starts the Hub and opens it in your browser. If it's already running, it just opens the browser.
+- Keeps your data in `%LOCALAPPDATA%\Night Tech Hub\data`, outside the program folder. Updating or uninstalling never deletes it.
+
+**Updating:** change `AppVersion` in `installer\NightTechHub.iss`, run `build.ps1` again, and run the new installer over the old one.
+
+**Already used the Hub with start.bat?** Close the Hub, then copy everything inside your old `data` folder into
+`%LOCALAPPDATA%\Night Tech Hub\data` (paste that path into File Explorer's address bar) before starting the installed version.
+
+**Windows warnings:** the installer isn't code-signed yet, so Windows SmartScreen may say "Windows protected your PC."
+Click **More info, then Run anyway**. Code signing (for example Azure Trusted Signing) removes this later.
+
+## Start it (without the installer)
 - **Windows:** double-click `start.bat`
 - **Mac or Linux:** run `./start.sh`
 
@@ -90,3 +115,17 @@ owner can download backups, export data, delete files or manage people.
 ## Updating or moving
 - **Moving to a new computer:** copy the whole `nighttech-hub` folder (including `data`) and start it there.
 - **Installing a newer version:** replace the program files with the new ones but **keep your `data` folder**. Your customers, tickets and settings carry over automatically.
+
+## GitHub builds and releases
+
+Every push to `main` runs the smoke tests (`python -m unittest discover -s tests -v`) and builds
+`NightTechHub-Setup.exe` on GitHub's Windows machines (Actions tab, download the artifact).
+Pushing a tag such as `v1.0.1` also publishes a Release with the installer and its SHA-256 file:
+
+```
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+Keep this repository **private**: it's the shop's own software. Customer data is never in the repository
+(the `data` folder is ignored).

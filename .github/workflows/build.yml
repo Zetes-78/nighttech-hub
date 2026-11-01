@@ -1,0 +1,58 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Version
+        id: ver
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") { $v = "${{ github.ref_name }}".TrimStart("v") }
+          else { $v = "1.0.0" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Test
+        shell: pwsh
+        run: |
+          python -m pip install -r requirements.txt
+          python -m unittest discover -s tests -v
+
+      - name: Install Inno Setup
+        run: choco install innosetup --version 6.7.1 --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: ./build.ps1 -Version ${{ steps.ver.outputs.version }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NightTechHub-Setup-${{ steps.ver.outputs.version }}
+          path: |
+            installer/Output/NightTechHub-Setup.exe
+            installer/Output/NightTechHub-Setup.exe.sha256.txt
+
+      - name: Publish release (tags only)
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Night Tech Hub ${{ steps.ver.outputs.version }}
+          files: |
+            installer/Output/NightTechHub-Setup.exe
+            installer/Output/NightTechHub-Setup.exe.sha256.txt
