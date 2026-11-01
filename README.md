@@ -29,8 +29,12 @@ It runs on your own computer. Your data stays with you.
 
 **Updating:** change `AppVersion` in `installer\NightTechHub.iss`, run `build.ps1` again, and run the new installer over the old one.
 
-**Already used the Hub with start.bat?** Close the Hub, then copy everything inside your old `data` folder into
-`%LOCALAPPDATA%\Night Tech Hub\data` (paste that path into File Explorer's address bar) before starting the installed version.
+**Already used the Hub with start.bat?** Since 1.1.1 the installed Hub finds it for you: when it starts with no customers
+or tickets, it looks in your user folders (Downloads, Desktop, Documents, OneDrive) and on the C: drive for an older
+`data\hub.db`, and copies the most recently used one in. The original folder is left where it was, and any data already
+in the installed copy is renamed to `data-before-import-<date>` instead of being deleted. A note saying where the data
+came from is saved as `imported-from.txt`. To turn this off, set the environment variable `NTHUB_NO_IMPORT=1`.
+To do it by hand: close the Hub, rename `%LOCALAPPDATA%\Night Tech Hub\data`, and copy your old `data` folder in its place.
 
 **Windows warnings:** the installer isn't code-signed yet, so Windows SmartScreen may say "Windows protected your PC."
 Click **More info, then Run anyway**. Code signing (for example Azure Trusted Signing) removes this later.

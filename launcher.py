@@ -63,6 +63,12 @@ def main():
         input("Press Enter to close this window.")
         return
 
+    try:
+        from importer import bring_in_old_data
+        bring_in_old_data(os.environ["NTHUB_DATA"])
+    except Exception as e:  # never stop the Hub from starting
+        print("Couldn't check for older data: %s" % e)
+
     from waitress import serve
     from app import app
 
