@@ -121,44 +121,69 @@ class HubFeatureTest(unittest.TestCase):
                           content_type="multipart/form-data", follow_redirects=True)
         self.assertIn("a Night Tech Recovery report.", bad.get_data(as_text=True))
 
-    def _wipe(self, **over):
+    def _device_ids(self):
+        with self.appmod.app.app_context():
+            return [r["id"] for r in self.appmod.get_db().execute("SELECT id FROM devices WHERE ticket_id=? ORDER BY id", (self.tid,))]
+
+    def _wipe(self, device_id=None, raw=None, **over):
         rep = {"tool": "Night Tech Wipe", "toolVersion": "0.1.0", "ticket": "NT-0001", "status": "Completed",
                "fullyVerified": True, "verified": True, "method": "Overwrite, 1 pass of zeros, every sector read back and checked",
-               "disk": {"model": "WDC WD10EZEX", "serial": "SN123", "sizeBytes": 1000000, "sectorSize": 512, "mediaType": "HDD"},
+               "disk": {"model": "WDC WD10EZEX", "serial": "WD-DRIVE1", "sizeBytes": 1000000, "sectorSize": 512, "mediaType": "HDD"},
                "started": "2026-11-01T18:00:00", "finished": "2026-11-01T20:30:00", "bytesWritten": 1000000, "bytesVerified": 1000000,
                "writeErrorSectors": 0, "verifyMismatchSectors": 0, "verifyReadErrorSectors": 0}
         for k, v in over.items():
             if k == "disk": rep["disk"].update(v)
             else: rep[k] = v
-        data = ("\ufeff" + json.dumps(rep)).encode("utf-8")
-        return self.c.post("/tickets/%d/wipe" % self.tid, data={"_csrf": self.tok, "file": (io.BytesIO(data), "wipe.json")},
-                           content_type="multipart/form-data", follow_redirects=True).get_data(as_text=True)
+        data = raw if raw is not None else ("\ufeff" + json.dumps(rep)).encode("utf-8")
+        form = {"_csrf": self.tok, "file": (io.BytesIO(data), "wipe.json")}
+        if device_id is not False:
+            form["device_id"] = str(device_id or self._device_ids()[0])
+        return self.c.post("/tickets/%d/wipe" % self.tid, data=form, content_type="multipart/form-data",
+                           follow_redirects=True).get_data(as_text=True)
 
-    def test_8_wipe_record_fills_the_certificate(self):
-        html = self._wipe()
-        self.assertIn("Wipe recorded. The Certificate of Data Wipe is filled in.", html)
+    def test_8_wipe_records_fill_each_devices_certificate(self):
+        first = self._device_ids()[0]
+        html = self._wipe(first)
+        self.assertIn("Its Certificate of Data Wipe page is filled in.", html)
         t = self.ticket()
         self.assertEqual(t["wipe_checked"], 1)
-        self.assertIn("every sector read back and checked on WDC WD10EZEX (S/N SN123)", t["wipe_method"])
-        self.assertEqual(t["wipe_started"], "2026-11-01 18:00")
-        self.assertEqual(t["wipe_finished"], "2026-11-01 20:30")
+        self.assertIn("every sector read back and checked on WDC WD10EZEX (S/N WD-DRIVE1)", t["wipe_method"])
+        self.assertEqual((t["wipe_started"], t["wipe_finished"]), ("2026-11-01 18:00", "2026-11-01 20:30"))
         self.assertTrue(self.c.get("/tickets/%d/certificate.pdf" % self.tid).data.startswith(b"%PDF-"))
 
-        # A second drive that didn't finish cleanly turns the "checked" box off for the ticket.
-        html = self._wipe(status="CompletedWithErrors", fullyVerified=False, writeErrorSectors=3, disk={"serial": "SN999", "model": "Old HDD"})
+        # Adding a second device that hasn't been wiped means the ticket isn't fully done.
+        self.post("/tickets/%d/devices/add" % self.tid, device_type="Laptop", make_model="HP 250", serial="HP2", storage_type="SSD")
+        self.assertEqual(self.ticket()["wipe_checked"], 0)
+        second = self._device_ids()[1]
+        html = self._wipe(second, status="CompletedWithErrors", fullyVerified=False, writeErrorSectors=3,
+                          disk={"serial": "SSD2", "model": "Kingston", "mediaType": "SSD"})
         self.assertIn("did NOT finish cleanly", html)
         self.assertEqual(self.ticket()["wipe_checked"], 0)
         self.assertIn("Not fully erased", self.c.get("/tickets/%d" % self.tid).get_data(as_text=True))
 
-    def test_9_wipe_record_that_contradicts_itself_isnt_trusted(self):
-        before = self.ticket()["wipe_checked"]
-        html = self._wipe(verifyMismatchSectors=2, disk={"serial": "SN777"})   # claims fullyVerified but lists bad sectors
-        self.assertIn("did NOT finish cleanly", html)
-        html = self._wipe(bytesVerified=500, disk={"serial": "SN778"})          # didn't check the whole drive
-        self.assertIn("did NOT finish cleanly", html)
-        bad = self.c.post("/tickets/%d/wipe" % self.tid, data={"_csrf": self.tok, "file": (io.BytesIO(b'{"tool":"Night Tech Recovery"}'), "x.json")},
-                          content_type="multipart/form-data", follow_redirects=True).get_data(as_text=True)
-        self.assertIn("a Night Tech Wipe record.", bad)
+        # The details form can't tick the box over the records.
+        self.post("/tickets/%d/update" % self.tid, service_type="PC or Mac repair", priority="Normal", wipe_checked="1",
+                  wipe_method="Made up")
+        self.assertEqual(self.ticket()["wipe_checked"], 0)
+        self.assertNotEqual(self.ticket()["wipe_method"], "Made up")
+
+        # Wiping the second drive again, cleanly, replaces its failed record.
+        html = self._wipe(second, disk={"serial": "SSD2", "model": "Kingston", "mediaType": "SSD"})
+        self.assertIn("filled in", html)
+        t = self.ticket()
+        self.assertEqual(t["wipe_checked"], 1)
+        self.assertIn("SSD: an overwrite may not reach", t["wipe_method"])
+
+    def test_9_bad_or_changed_wipe_records_are_refused_or_not_trusted(self):
+        for over in [dict(verifyMismatchSectors=2), dict(bytesVerified=500), dict(bytesWritten=10),
+                     dict(writeErrorSectors=-1, verifyMismatchSectors=1)]:
+            html = self._wipe(**over)
+            self.assertTrue("did NOT finish cleanly" in html or "has been changed" in html, over)
+        self.assertIn("has been changed", self._wipe(writeErrorSectors=1.5))
+        self.assertIn("has been changed", self._wipe(raw=b'{"tool":"Night Tech Wipe","disk":{"sizeBytes":Infinity}}'))
+        self.assertIn("has been changed", self._wipe(raw=b'{"tool":"Night Tech Recovery"}'))
+        self.assertIn("is for ticket NT-9999", self._wipe(ticket="NT-9999"))
+        self.assertIn("Choose which device", self._wipe(device_id=False))
 
     def test_7_settings_save(self):
         r = self.post("/settings/texts", tax_rate="7", estimate_note="Estimate only.", text_received="Got it, {first}!",

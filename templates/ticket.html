@@ -138,19 +138,26 @@
 <section class="card" id="wipe">
   <h2>Night Tech Wipe records</h2>
   {% for w in wipes %}
+  {% set dv = (devs|selectattr('id', 'equalto', w['device_id'])|first) %}
   <div class="note">
-    <p><b>{{ w['model'] or 'Drive' }}</b>{% if w['serial'] %} &middot; S/N {{ w['serial'] }}{% endif %} &middot; {{ w['size_bytes']|bytes }}{% if w['media'] %} {{ w['media'] }}{% endif %}</p>
+    <p><b>{{ (dv['make_model'] or dv['device_type']) if dv else 'Device removed' }}</b> &middot; drive {{ w['model'] or '' }}{% if w['serial'] %} S/N {{ w['serial'] }}{% endif %} &middot; {{ w['size_bytes']|bytes }}{% if w['media'] %} {{ w['media'] }}{% endif %}</p>
     {% if w['fully_verified'] %}<p>Erased and every sector checked &middot; {{ w['method'] }}</p>
     {% else %}<p><b>Not fully erased ({{ w['status'] }}{% if w['problem_sectors'] %}, {{ w['problem_sectors'] }} problem sector(s){% endif %}).</b> Wipe it again or destroy the drive.</p>{% endif %}
     <p class="tiny muted">{{ w['started'][:16]|replace('T', ' ') }} to {{ w['finished'][:16]|replace('T', ' ') }}</p>
     {% if w['attachment_id'] %}<a class="tiny" href="{{ url_for('file_download', fid=w['attachment_id']) }}">Download record</a>{% endif %}
   </div>
-  {% else %}<p class="muted">No wipes recorded. After erasing a drive with Night Tech Wipe, add its <code>.json</code> record here. It fills in the Certificate of Data Wipe.</p>{% endfor %}
+  {% else %}<p class="muted">No wipes recorded. After erasing a drive with Night Tech Wipe, add its <code>.json</code> record here and pick the device it came from. It fills in that device's Certificate of Data Wipe page.</p>{% endfor %}
+  {% if devs %}
   <form method="post" action="{{ url_for('ticket_wipe', tid=t['id']) }}" enctype="multipart/form-data" class="inlineform">{{ csrf() }}
+    <select name="device_id" required aria-label="Device the drive came from">
+      <option value="">Which device?</option>
+      {% for dv in devs %}<option value="{{ dv['id'] }}">{{ dv['make_model'] or dv['device_type'] or 'Device' }}{% if dv['serial'] %} ({{ dv['serial'] }}){% endif %}</option>{% endfor %}
+    </select>
     <input type="file" name="file" accept=".json,application/json" required>
     <button class="btn small primary" type="submit">Add Wipe record</button>
     {% if wipes %}<a class="btn small" href="{{ url_for('pdf_certificate', tid=t['id']) }}" target="_blank">Print wipe certificate</a>{% endif %}
   </form>
+  {% else %}<p class="muted">Add the device under Devices first.</p>{% endif %}
 </section>
 
 <section class="card" id="devices">
@@ -199,10 +206,18 @@
     </div>
     <h3>Wipe record <span class="tiny muted">(prints on the Certificate of Data Wipe)</span></h3>
     <div class="devgrid">
+      {% if wipes %}
+      <p class="wide tiny muted">Filled in from the Night Tech Wipe records above, per device. Add another record to change it.</p>
+      <label class="wide">Wipe method used<input value="{{ t['wipe_method'] or '' }}" readonly></label>
+      <label>Wipe started<input value="{{ t['wipe_started'] or '' }}" readonly></label>
+      <label>Wipe finished<input value="{{ t['wipe_finished'] or '' }}" readonly></label>
+      <label class="check"><input type="checkbox" disabled {{ 'checked' if t['wipe_checked'] }}> Every device wiped and checked</label>
+      {% else %}
       <label class="wide">Wipe method used<input name="wipe_method" value="{{ t['wipe_method'] or '' }}" maxlength="300"></label>
       <label>Wipe started<input name="wipe_started" value="{{ t['wipe_started'] or '' }}" placeholder="2026-10-22 18:30" maxlength="40"></label>
       <label>Wipe finished<input name="wipe_finished" value="{{ t['wipe_finished'] or '' }}" placeholder="2026-10-22 20:10" maxlength="40"></label>
       <label class="check"><input type="checkbox" name="wipe_checked" value="1" {{ 'checked' if t['wipe_checked'] }}> Wipe finished and checked</label>
+      {% endif %}
       <label>Handed off to<input name="handoff_to" value="{{ t['handoff_to'] or '' }}" placeholder="Recycler or recipient" maxlength="200"></label>
     </div>
     <button class="btn primary" type="submit">Save ticket</button>

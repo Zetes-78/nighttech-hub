@@ -99,17 +99,23 @@ def _wrap(c, text, font, size, width):
     return lines
 
 
-def certificate(ticket, customer, devices):
-    """One Certificate of Data Wipe page per device."""
+def certificate(ticket, customer, devices, wipes=None):
+    """One Certificate of Data Wipe page per device. With Night Tech Wipe records (wipes = {device_id: fields}),
+    each page shows only its own device's wipe; a device without a record shows none."""
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=letter)
     c.setTitle("Certificate of Data Wipe - %s" % ticket["number"]); c.setAuthor(SHOP["name"])
     devices = devices or [None]
     for d in devices:
+        if wipes is not None:
+            wf = wipes.get(d["id"] if d else None) or dict(method="", started="", finished="", checked=False)
+        else:
+            wf = dict(method=ticket["wipe_method"] or "", started=ticket["wipe_started"] or "", finished=ticket["wipe_finished"] or "",
+                     checked=bool(ticket["wipe_checked"]))
         y = _header(c, "Certificate of Data Wipe", "After-hours IT support and repair   |   " + SHOP["area"])
         contact = " / ".join([x for x in [customer["phone"], customer["email"]] if x])
         _field(c, M, y, 190, "Record number", ticket["number"]); _field(c, M + 216, y, 150, "Date received", _date(ticket["created_at"]))
-        _field(c, M + 392, y, CW - 392, "Date completed", _date(ticket["wipe_finished"]))
+        _field(c, M + 392, y, CW - 392, "Date completed", _date(wf["finished"]) if wf["finished"] else "")
         y -= 38; _field(c, M, y, 250, "Customer name", customer["name"]); _field(c, M + 276, y, CW - 276, "Phone or email", contact)
         y -= 34; _heading(c, y, "Device")
         y -= 32
@@ -124,10 +130,10 @@ def certificate(ticket, customer, devices):
         y -= 24; _box(c, M, y, "Customer confirmed they backed up anything they want to keep")
         y -= 21; _box(c, M, y, "Customer signed out of their accounts and turned off Find My, Activation Lock or similar")
         y -= 34; _heading(c, y, "The wipe")
-        y -= 30; _field(c, M, y, CW, "Wipe method used", ticket["wipe_method"] or "")
-        y -= 36; _field(c, M, y, 230, "Wipe started (date and time)", ticket["wipe_started"] or "")
-        _field(c, M + 256, y, CW - 256, "Wipe finished (date and time)", ticket["wipe_finished"] or "")
-        y -= 26; _box(c, M, y, "Wipe finished and checked", checked=bool(ticket["wipe_checked"]))
+        y -= 30; _field(c, M, y, CW, "Wipe method used", wf["method"])
+        y -= 36; _field(c, M, y, 230, "Wipe started (date and time)", wf["started"])
+        _field(c, M + 256, y, CW - 256, "Wipe finished (date and time)", wf["finished"])
+        y -= 26; _box(c, M, y, "Wipe finished and checked", checked=bool(wf["checked"]))
         y -= 34; _heading(c, y, "What happened to the device")
         disp = (d["disposition"] if d else "") or ""
         y -= 24; _box(c, M, y, "Returned to customer", checked=(disp == "Returned to customer"))

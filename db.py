@@ -112,7 +112,8 @@ CREATE TABLE IF NOT EXISTS recovery_reports (
 CREATE INDEX IF NOT EXISTS idx_quote_lines_ticket ON quote_lines(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_recovery_ticket ON recovery_reports(ticket_id);
 CREATE TABLE IF NOT EXISTS wipe_reports (
-  id INTEGER PRIMARY KEY, ticket_id INTEGER NOT NULL REFERENCES tickets(id), attachment_id INTEGER REFERENCES attachments(id),
+  id INTEGER PRIMARY KEY, ticket_id INTEGER NOT NULL REFERENCES tickets(id), device_id INTEGER REFERENCES devices(id),
+  attachment_id INTEGER REFERENCES attachments(id),
   model TEXT, serial TEXT, size_bytes INTEGER, media TEXT, method TEXT, status TEXT, fully_verified INTEGER NOT NULL DEFAULT 0,
   started TEXT, finished TEXT, problem_sectors INTEGER, tool_version TEXT, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_wipe_ticket ON wipe_reports(ticket_id);

@@ -503,6 +503,10 @@ def ticket_update(tid):
                quote_amount=quote_val, invoice_link=link, storage_location=clean(f.get("storage_location"), 120), assigned_to=assigned,
                due_date=due or None, wipe_method=clean(f.get("wipe_method"), 300), wipe_started=clean(f.get("wipe_started"), 40),
                wipe_finished=clean(f.get("wipe_finished"), 40), wipe_checked=1 if f.get("wipe_checked") else 0, handoff_to=clean(f.get("handoff_to"), 200))
+    if d.execute("SELECT 1 FROM wipe_reports WHERE ticket_id=? LIMIT 1", (tid,)).fetchone():
+        # Night Tech Wipe records decide these; the form can't change them.
+        for k in ("wipe_method", "wipe_started", "wipe_finished", "wipe_checked"):
+            new[k] = t[k]
     labels = {"storage_location": "Storage location", "wipe_method": "Wipe method", "wipe_started": "Wipe started", "wipe_finished": "Wipe finished",
               "wipe_checked": "Wipe checked", "handoff_to": "Handed off to", "priority": "Priority", "service_type": "Service", "assigned_to": "Assigned to",
               "quote_amount": "Quote"}
@@ -568,7 +572,9 @@ def device_add(tid):
         st = f.get("storage_type") if f.get("storage_type") in db.STORAGE_TYPES else ""
         d.execute("INSERT INTO devices(ticket_id,customer_id,device_type,make_model,serial,storage_type,created_at) VALUES (?,?,?,?,?,?,?)",
                   (tid, t["customer_id"], dtype, m, s, st, db.now()))
-        log_event(tid, "Device added", "%s %s %s" % (dtype, m, s)); d.commit()
+        log_event(tid, "Device added", "%s %s %s" % (dtype, m, s))
+        sync_wipe_certificate(tid)  # a new device isn't wiped yet
+        d.commit()
     return redirect(url_for("ticket_view", tid=tid) + "#devices")
 
 
@@ -813,35 +819,71 @@ def ticket_recovery(tid):
 
 
 # ---------------------------------------------------------------- Night Tech Wipe records
+SSD_NOTE = " (SSD: an overwrite may not reach the drive's spare memory)"
+
+
 def _wipe_time(value):
     """ISO time from the wipe record -> '2026-11-01 18:30' for the certificate."""
-    s = str(value or "")[:19].replace("T", " ")
-    return s[:16]
+    return str(value or "")[:19].replace("T", " ")[:16]
+
+
+def _count(value):
+    """A whole, non-negative count from the record; anything else makes the record invalid."""
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value < 2 ** 63:
+        raise ValueError("bad number")
+    return value
+
+
+def wipes_by_device(tid):
+    """{device_id: latest wipe record for that device}. A later wipe of the same device replaces an earlier one."""
+    out = {}
+    for r in get_db().execute("SELECT * FROM wipe_reports WHERE ticket_id=? ORDER BY id", (tid,)).fetchall():
+        out[r["device_id"]] = r
+    return out
+
+
+def device_wipe_fields(r):
+    """Certificate fields for one device from its wipe record."""
+    if r is None:
+        return dict(method="", started="", finished="", checked=False)
+    method = "%s on %s%s" % (r["method"], r["model"] or "drive", (" (S/N %s)" % r["serial"]) if r["serial"] else "")
+    if (r["media"] or "") == "SSD":
+        method += SSD_NOTE
+    if not r["fully_verified"]:
+        method = "NOT FULLY ERASED: " + method
+    return dict(method=method[:300], started=_wipe_time(r["started"]), finished=_wipe_time(r["finished"]),
+                checked=bool(r["fully_verified"]))
 
 
 def sync_wipe_certificate(tid):
-    """Fill the ticket's certificate fields from its wipe records.
-    'Wipe finished and checked' is ticked only when every record on the ticket is a fully checked wipe."""
+    """Keep the ticket's summary wipe fields in step with its records. 'Checked' means every device on the ticket
+    has a complete, fully checked wipe as its latest record."""
     d = get_db()
-    rows = d.execute("SELECT * FROM wipe_reports WHERE ticket_id=? ORDER BY id", (tid,)).fetchall()
-    if not rows:
+    latest = wipes_by_device(tid)
+    if not latest:
         return
-    good = [r for r in rows if r["fully_verified"]]
-    method = "; ".join("%s on %s%s" % (r["method"], r["model"] or "drive", (" (S/N %s)" % r["serial"]) if r["serial"] else "")
-                       for r in good)[:300]
-    starts = sorted(r["started"] for r in good if r["started"])
-    ends = sorted(r["finished"] for r in good if r["finished"])
-    checked = 1 if good and len(good) == len(rows) else 0
+    devs = d.execute("SELECT id FROM devices WHERE ticket_id=?", (tid,)).fetchall()
+    fields = [device_wipe_fields(r) for r in latest.values()]
+    good = [f for f in fields if f["checked"]]
+    checked = 1 if devs and all(dv["id"] in latest and latest[dv["id"]]["fully_verified"] for dv in devs) else 0
+    starts = sorted(f["started"] for f in good if f["started"])
+    ends = sorted(f["finished"] for f in good if f["finished"])
     d.execute("UPDATE tickets SET wipe_method=?, wipe_started=?, wipe_finished=?, wipe_checked=?, updated_at=? WHERE id=?",
-              (method or None, _wipe_time(starts[0]) if starts else None, _wipe_time(ends[-1]) if ends else None,
+              ("; ".join(f["method"] for f in fields)[:300] or None, starts[0] if starts else None, ends[-1] if ends else None,
                checked, db.now(), tid))
 
 
 @app.route("/tickets/<int:tid>/wipe", methods=["POST"])
 def ticket_wipe(tid):
     d = get_db(); t = get_ticket_or_404(tid)
-    up = request.files.get("file")
     back = redirect(url_for("ticket_view", tid=tid) + "#wipe")
+    devs = d.execute("SELECT * FROM devices WHERE ticket_id=? ORDER BY id", (tid,)).fetchall()
+    dev_id = request.form.get("device_id", "")
+    device = next((x for x in devs if str(x["id"]) == dev_id), None)
+    if device is None:
+        flash("Choose which device on this ticket the wiped drive came from. Add the device first if it isn't listed.", "error")
+        return back
+    up = request.files.get("file")
     if not up or not up.filename.lower().endswith(".json"):
         flash("Choose the Night Tech Wipe record that ends in .json.", "error")
         return back
@@ -850,19 +892,27 @@ def ticket_wipe(tid):
         rep = json.loads(raw.decode("utf-8-sig"))
         if not isinstance(rep, dict) or rep.get("tool") != "Night Tech Wipe":
             raise ValueError
-        disk = rep.get("disk") or {}
-        problems = sum(int(rep.get(k) or 0) for k in ("writeErrorSectors", "verifyMismatchSectors", "verifyReadErrorSectors"))
+        disk = rep.get("disk")
+        if not isinstance(disk, dict):
+            raise ValueError
+        size = _count(disk.get("sizeBytes"))
+        counts = [_count(rep.get(k)) for k in ("writeErrorSectors", "verifyMismatchSectors", "verifyReadErrorSectors")]
+        written, checked_bytes = _count(rep.get("bytesWritten")), _count(rep.get("bytesVerified"))
         status = str(rep.get("status") or "")[:40]
-        # Trust a "fully checked" wipe only if the record agrees with itself.
-        full = (rep.get("fullyVerified") is True and status == "Completed" and rep.get("verified") is True and problems == 0
-                and int(rep.get("bytesVerified") or 0) == int(disk.get("sizeBytes") or -1) > 0)
-        row = dict(model=str(disk.get("model") or "")[:120], serial=str(disk.get("serial") or "")[:80],
-                   size_bytes=int(disk.get("sizeBytes") or 0), media=str(disk.get("mediaType") or "")[:20],
-                   method=str(rep.get("method") or "")[:200], status=status, fully_verified=1 if full else 0,
-                   started=str(rep.get("started") or "")[:40], finished=str(rep.get("finished") or "")[:40],
-                   problem_sectors=problems, tool_version=str(rep.get("toolVersion") or "")[:20])
-    except (ValueError, TypeError, AttributeError):
-        flash("That file isn't a Night Tech Wipe record.", "error")
+        record_ticket = str(rep.get("ticket") or "").strip()
+        # Trust "fully checked" only if every part of the record agrees.
+        full = (rep.get("fullyVerified") is True and rep.get("verified") is True and status == "Completed"
+                and size > 0 and written == size and checked_bytes == size and all(c == 0 for c in counts))
+        row = dict(model=str(disk.get("model") or "")[:120], serial=str(disk.get("serial") or "")[:80], size_bytes=size,
+                   media=str(disk.get("mediaType") or "")[:20], method=str(rep.get("method") or "")[:200], status=status,
+                   fully_verified=1 if full else 0, started=str(rep.get("started") or "")[:40],
+                   finished=str(rep.get("finished") or "")[:40], problem_sectors=sum(counts),
+                   tool_version=str(rep.get("toolVersion") or "")[:20])
+    except (ValueError, TypeError, AttributeError, OverflowError, RecursionError, UnicodeDecodeError):
+        flash("That file isn't a Night Tech Wipe record, or it has been changed.", "error")
+        return back
+    if record_ticket and record_ticket.upper() != (t["number"] or "").upper():
+        flash("That wipe record is for ticket %s, not %s. Nothing was added." % (record_ticket[:20], t["number"]), "error")
         return back
     up.stream.seek(0)
     fid, err = save_upload(up, tid, t["customer_id"], "Wipe record",
@@ -870,24 +920,21 @@ def ticket_wipe(tid):
     if err:
         flash(err, "error")
         return back
-    d.execute("INSERT INTO wipe_reports(ticket_id,attachment_id,model,serial,size_bytes,media,method,status,fully_verified,started,finished,"
-              "problem_sectors,tool_version,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-              (tid, fid, row["model"], row["serial"], row["size_bytes"], row["media"], row["method"], row["status"], row["fully_verified"],
-               row["started"], row["finished"], row["problem_sectors"], row["tool_version"], db.now()))
-    log_event(tid, "Wipe recorded", "%s%s: %s%s" % (
-        row["model"] or "drive", (" S/N " + row["serial"]) if row["serial"] else "",
+    d.execute("INSERT INTO wipe_reports(ticket_id,device_id,attachment_id,model,serial,size_bytes,media,method,status,fully_verified,"
+              "started,finished,problem_sectors,tool_version,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+              (tid, device["id"], fid, row["model"], row["serial"], row["size_bytes"], row["media"], row["method"], row["status"],
+               row["fully_verified"], row["started"], row["finished"], row["problem_sectors"], row["tool_version"], db.now()))
+    log_event(tid, "Wipe recorded", "%s, drive %s%s: %s%s" % (
+        device["make_model"] or device["device_type"] or "device", row["model"] or "drive", (" S/N " + row["serial"]) if row["serial"] else "",
         "erased and every sector checked" if full else "NOT fully erased (%s)" % (row["status"] or "unknown"),
         (", %d problem sector(s)" % row["problem_sectors"]) if row["problem_sectors"] else ""))
     sync_wipe_certificate(tid)
     d.commit()
-    serials = {(x["serial"] or "").strip().lower() for x in ticket_bundle(tid)[2] if x["serial"]}
     if not full:
-        flash("Record added, but this wipe did NOT finish cleanly (%s). The certificate's 'checked' box stays off. "
+        flash("Record added, but this wipe did NOT finish cleanly (%s). This device's certificate won't be marked checked. "
               "Wipe the drive again or destroy it." % (row["status"] or "unknown"), "error")
-    elif row["serial"] and serials and row["serial"].strip().lower() not in serials:
-        flash("Wipe recorded, but its drive serial (%s) doesn't match any device on this ticket. Double-check it's the right ticket." % row["serial"], "error")
     else:
-        flash("Wipe recorded. The Certificate of Data Wipe is filled in.", "ok")
+        flash("Wipe recorded for %s. Its Certificate of Data Wipe page is filled in." % (device["make_model"] or "the device"), "ok")
     return back
 
 
@@ -913,7 +960,9 @@ def _pdf(fn, name, tid):
 
 @app.route("/tickets/<int:tid>/certificate.pdf")
 def pdf_certificate(tid):
-    return _pdf(pdfs.certificate, "certificate-of-data-wipe", tid)
+    latest = wipes_by_device(tid)
+    wipes = {dev_id: device_wipe_fields(r) for dev_id, r in latest.items()} if latest else None
+    return _pdf(lambda t, c, devs: pdfs.certificate(t, c, devs, wipes=wipes), "certificate-of-data-wipe", tid)
 
 
 @app.route("/tickets/<int:tid>/release.pdf")
