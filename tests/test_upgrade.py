@@ -121,6 +121,45 @@ class HubFeatureTest(unittest.TestCase):
                           content_type="multipart/form-data", follow_redirects=True)
         self.assertIn("a Night Tech Recovery report.", bad.get_data(as_text=True))
 
+    def _wipe(self, **over):
+        rep = {"tool": "Night Tech Wipe", "toolVersion": "0.1.0", "ticket": "NT-0001", "status": "Completed",
+               "fullyVerified": True, "verified": True, "method": "Overwrite, 1 pass of zeros, every sector read back and checked",
+               "disk": {"model": "WDC WD10EZEX", "serial": "SN123", "sizeBytes": 1000000, "sectorSize": 512, "mediaType": "HDD"},
+               "started": "2026-11-01T18:00:00", "finished": "2026-11-01T20:30:00", "bytesWritten": 1000000, "bytesVerified": 1000000,
+               "writeErrorSectors": 0, "verifyMismatchSectors": 0, "verifyReadErrorSectors": 0}
+        for k, v in over.items():
+            if k == "disk": rep["disk"].update(v)
+            else: rep[k] = v
+        data = ("\ufeff" + json.dumps(rep)).encode("utf-8")
+        return self.c.post("/tickets/%d/wipe" % self.tid, data={"_csrf": self.tok, "file": (io.BytesIO(data), "wipe.json")},
+                           content_type="multipart/form-data", follow_redirects=True).get_data(as_text=True)
+
+    def test_8_wipe_record_fills_the_certificate(self):
+        html = self._wipe()
+        self.assertIn("Wipe recorded. The Certificate of Data Wipe is filled in.", html)
+        t = self.ticket()
+        self.assertEqual(t["wipe_checked"], 1)
+        self.assertIn("every sector read back and checked on WDC WD10EZEX (S/N SN123)", t["wipe_method"])
+        self.assertEqual(t["wipe_started"], "2026-11-01 18:00")
+        self.assertEqual(t["wipe_finished"], "2026-11-01 20:30")
+        self.assertTrue(self.c.get("/tickets/%d/certificate.pdf" % self.tid).data.startswith(b"%PDF-"))
+
+        # A second drive that didn't finish cleanly turns the "checked" box off for the ticket.
+        html = self._wipe(status="CompletedWithErrors", fullyVerified=False, writeErrorSectors=3, disk={"serial": "SN999", "model": "Old HDD"})
+        self.assertIn("did NOT finish cleanly", html)
+        self.assertEqual(self.ticket()["wipe_checked"], 0)
+        self.assertIn("Not fully erased", self.c.get("/tickets/%d" % self.tid).get_data(as_text=True))
+
+    def test_9_wipe_record_that_contradicts_itself_isnt_trusted(self):
+        before = self.ticket()["wipe_checked"]
+        html = self._wipe(verifyMismatchSectors=2, disk={"serial": "SN777"})   # claims fullyVerified but lists bad sectors
+        self.assertIn("did NOT finish cleanly", html)
+        html = self._wipe(bytesVerified=500, disk={"serial": "SN778"})          # didn't check the whole drive
+        self.assertIn("did NOT finish cleanly", html)
+        bad = self.c.post("/tickets/%d/wipe" % self.tid, data={"_csrf": self.tok, "file": (io.BytesIO(b'{"tool":"Night Tech Recovery"}'), "x.json")},
+                          content_type="multipart/form-data", follow_redirects=True).get_data(as_text=True)
+        self.assertIn("a Night Tech Wipe record.", bad)
+
     def test_7_settings_save(self):
         r = self.post("/settings/texts", tax_rate="7", estimate_note="Estimate only.", text_received="Got it, {first}!",
                       text_quote="q", text_parts="p", text_ready="r", text_custom="c")
@@ -167,7 +206,7 @@ class UpgradeTest(unittest.TestCase):
             self.assertIn(col, cols)
         self.assertEqual(conn.execute("SELECT number, status FROM tickets").fetchone(), ("NT-0001", "In progress"))
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        self.assertTrue({"quote_lines", "recovery_reports"} <= tables)
+        self.assertTrue({"quote_lines", "recovery_reports", "wipe_reports"} <= tables)
         conn.close()
         # Second start: nothing left to upgrade, so no extra backup
         subprocess.run([sys.executable, "-c", code], check=True, env=env)

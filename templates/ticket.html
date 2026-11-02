@@ -135,6 +135,24 @@
   </form>
 </section>
 
+<section class="card" id="wipe">
+  <h2>Night Tech Wipe records</h2>
+  {% for w in wipes %}
+  <div class="note">
+    <p><b>{{ w['model'] or 'Drive' }}</b>{% if w['serial'] %} &middot; S/N {{ w['serial'] }}{% endif %} &middot; {{ w['size_bytes']|bytes }}{% if w['media'] %} {{ w['media'] }}{% endif %}</p>
+    {% if w['fully_verified'] %}<p>Erased and every sector checked &middot; {{ w['method'] }}</p>
+    {% else %}<p><b>Not fully erased ({{ w['status'] }}{% if w['problem_sectors'] %}, {{ w['problem_sectors'] }} problem sector(s){% endif %}).</b> Wipe it again or destroy the drive.</p>{% endif %}
+    <p class="tiny muted">{{ w['started'][:16]|replace('T', ' ') }} to {{ w['finished'][:16]|replace('T', ' ') }}</p>
+    {% if w['attachment_id'] %}<a class="tiny" href="{{ url_for('file_download', fid=w['attachment_id']) }}">Download record</a>{% endif %}
+  </div>
+  {% else %}<p class="muted">No wipes recorded. After erasing a drive with Night Tech Wipe, add its <code>.json</code> record here. It fills in the Certificate of Data Wipe.</p>{% endfor %}
+  <form method="post" action="{{ url_for('ticket_wipe', tid=t['id']) }}" enctype="multipart/form-data" class="inlineform">{{ csrf() }}
+    <input type="file" name="file" accept=".json,application/json" required>
+    <button class="btn small primary" type="submit">Add Wipe record</button>
+    {% if wipes %}<a class="btn small" href="{{ url_for('pdf_certificate', tid=t['id']) }}" target="_blank">Print wipe certificate</a>{% endif %}
+  </form>
+</section>
+
 <section class="card" id="devices">
   <h2>Devices ({{ devs|length }})</h2>
   {% for d in devs %}

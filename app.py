@@ -451,9 +451,10 @@ def ticket_view(tid):
     minutes = sum(x["minutes"] for x in times)
     lines, totals = quote_totals(tid)
     reports = d.execute("SELECT * FROM recovery_reports WHERE ticket_id=? ORDER BY id DESC", (tid,)).fetchall()
+    wipes = d.execute("SELECT * FROM wipe_reports WHERE ticket_id=? ORDER BY id DESC", (tid,)).fetchall()
     sig = d.execute("SELECT id FROM attachments WHERE ticket_id=? AND stored_name=?", (tid, t["intake_signature"])).fetchone() if t["intake_signature"] else None
     return render_template("ticket.html", t=t, c=c, devs=devs, notes=notes, events=events, parts=parts, times=times, files=files,
-                           users=users, parts_total=parts_total, minutes=minutes, qlines=lines, qt=totals, reports=reports,
+                           users=users, parts_total=parts_total, minutes=minutes, qlines=lines, qt=totals, reports=reports, wipes=wipes,
                            texts=customer_texts(t, c, devs, totals), sig_file=sig["id"] if sig else None,
                            tax_rate=tax_rate())
 
@@ -809,6 +810,85 @@ def ticket_recovery(tid):
     else:
         flash("Recovery report added to the ticket.", "ok")
     return redirect(url_for("ticket_view", tid=tid) + "#recovery")
+
+
+# ---------------------------------------------------------------- Night Tech Wipe records
+def _wipe_time(value):
+    """ISO time from the wipe record -> '2026-11-01 18:30' for the certificate."""
+    s = str(value or "")[:19].replace("T", " ")
+    return s[:16]
+
+
+def sync_wipe_certificate(tid):
+    """Fill the ticket's certificate fields from its wipe records.
+    'Wipe finished and checked' is ticked only when every record on the ticket is a fully checked wipe."""
+    d = get_db()
+    rows = d.execute("SELECT * FROM wipe_reports WHERE ticket_id=? ORDER BY id", (tid,)).fetchall()
+    if not rows:
+        return
+    good = [r for r in rows if r["fully_verified"]]
+    method = "; ".join("%s on %s%s" % (r["method"], r["model"] or "drive", (" (S/N %s)" % r["serial"]) if r["serial"] else "")
+                       for r in good)[:300]
+    starts = sorted(r["started"] for r in good if r["started"])
+    ends = sorted(r["finished"] for r in good if r["finished"])
+    checked = 1 if good and len(good) == len(rows) else 0
+    d.execute("UPDATE tickets SET wipe_method=?, wipe_started=?, wipe_finished=?, wipe_checked=?, updated_at=? WHERE id=?",
+              (method or None, _wipe_time(starts[0]) if starts else None, _wipe_time(ends[-1]) if ends else None,
+               checked, db.now(), tid))
+
+
+@app.route("/tickets/<int:tid>/wipe", methods=["POST"])
+def ticket_wipe(tid):
+    d = get_db(); t = get_ticket_or_404(tid)
+    up = request.files.get("file")
+    back = redirect(url_for("ticket_view", tid=tid) + "#wipe")
+    if not up or not up.filename.lower().endswith(".json"):
+        flash("Choose the Night Tech Wipe record that ends in .json.", "error")
+        return back
+    raw = up.stream.read(2_000_000)
+    try:
+        rep = json.loads(raw.decode("utf-8-sig"))
+        if not isinstance(rep, dict) or rep.get("tool") != "Night Tech Wipe":
+            raise ValueError
+        disk = rep.get("disk") or {}
+        problems = sum(int(rep.get(k) or 0) for k in ("writeErrorSectors", "verifyMismatchSectors", "verifyReadErrorSectors"))
+        status = str(rep.get("status") or "")[:40]
+        # Trust a "fully checked" wipe only if the record agrees with itself.
+        full = (rep.get("fullyVerified") is True and status == "Completed" and rep.get("verified") is True and problems == 0
+                and int(rep.get("bytesVerified") or 0) == int(disk.get("sizeBytes") or -1) > 0)
+        row = dict(model=str(disk.get("model") or "")[:120], serial=str(disk.get("serial") or "")[:80],
+                   size_bytes=int(disk.get("sizeBytes") or 0), media=str(disk.get("mediaType") or "")[:20],
+                   method=str(rep.get("method") or "")[:200], status=status, fully_verified=1 if full else 0,
+                   started=str(rep.get("started") or "")[:40], finished=str(rep.get("finished") or "")[:40],
+                   problem_sectors=problems, tool_version=str(rep.get("toolVersion") or "")[:20])
+    except (ValueError, TypeError, AttributeError):
+        flash("That file isn't a Night Tech Wipe record.", "error")
+        return back
+    up.stream.seek(0)
+    fid, err = save_upload(up, tid, t["customer_id"], "Wipe record",
+                           "Night Tech Wipe record: %s %s" % (row["model"] or "drive", row["serial"]))
+    if err:
+        flash(err, "error")
+        return back
+    d.execute("INSERT INTO wipe_reports(ticket_id,attachment_id,model,serial,size_bytes,media,method,status,fully_verified,started,finished,"
+              "problem_sectors,tool_version,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+              (tid, fid, row["model"], row["serial"], row["size_bytes"], row["media"], row["method"], row["status"], row["fully_verified"],
+               row["started"], row["finished"], row["problem_sectors"], row["tool_version"], db.now()))
+    log_event(tid, "Wipe recorded", "%s%s: %s%s" % (
+        row["model"] or "drive", (" S/N " + row["serial"]) if row["serial"] else "",
+        "erased and every sector checked" if full else "NOT fully erased (%s)" % (row["status"] or "unknown"),
+        (", %d problem sector(s)" % row["problem_sectors"]) if row["problem_sectors"] else ""))
+    sync_wipe_certificate(tid)
+    d.commit()
+    serials = {(x["serial"] or "").strip().lower() for x in ticket_bundle(tid)[2] if x["serial"]}
+    if not full:
+        flash("Record added, but this wipe did NOT finish cleanly (%s). The certificate's 'checked' box stays off. "
+              "Wipe the drive again or destroy it." % (row["status"] or "unknown"), "error")
+    elif row["serial"] and serials and row["serial"].strip().lower() not in serials:
+        flash("Wipe recorded, but its drive serial (%s) doesn't match any device on this ticket. Double-check it's the right ticket." % row["serial"], "error")
+    else:
+        flash("Wipe recorded. The Certificate of Data Wipe is filled in.", "ok")
+    return back
 
 
 def human_bytes(n):

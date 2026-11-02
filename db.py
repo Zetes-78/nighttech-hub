@@ -54,7 +54,7 @@ DEVICE_TYPES = ["Desktop", "Laptop", "Phone", "Tablet", "Game console", "Hard dr
 STORAGE_TYPES = ["", "Hard drive", "SSD", "Phone or tablet memory", "Other", "None"]
 DISPOSITIONS = ["", "Returned to customer", "Refurbish", "Parts", "Drive removed", "Recycled",
                 "Handed off for reuse or recycling"]
-FILE_CATEGORIES = ["General", "Photo", "Receipt", "Quote or invoice", "Certificate or release", "Signature", "Recovery report",
+FILE_CATEGORIES = ["General", "Photo", "Receipt", "Quote or invoice", "Certificate or release", "Signature", "Recovery report", "Wipe record",
                    "Vendor or recycler", "Template", "Other"]
 ALLOWED_UPLOADS = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif",
                    "webp": "image/webp", "pdf": "application/pdf", "txt": "text/plain",
@@ -111,6 +111,11 @@ CREATE TABLE IF NOT EXISTS recovery_reports (
   bad_sectors INTEGER, sha256 TEXT, finished TEXT, tool_version TEXT, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_quote_lines_ticket ON quote_lines(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_recovery_ticket ON recovery_reports(ticket_id);
+CREATE TABLE IF NOT EXISTS wipe_reports (
+  id INTEGER PRIMARY KEY, ticket_id INTEGER NOT NULL REFERENCES tickets(id), attachment_id INTEGER REFERENCES attachments(id),
+  model TEXT, serial TEXT, size_bytes INTEGER, media TEXT, method TEXT, status TEXT, fully_verified INTEGER NOT NULL DEFAULT 0,
+  started TEXT, finished TEXT, problem_sectors INTEGER, tool_version TEXT, created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_wipe_ticket ON wipe_reports(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_subscribers_status ON subscribers(status);
 CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
 CREATE INDEX IF NOT EXISTS idx_tickets_customer ON tickets(customer_id);
@@ -143,7 +148,7 @@ ADDED_COLUMNS = [
     ("tickets", "intake_signature", "TEXT"),
     ("tickets", "intake_by", "INTEGER"),
 ]
-NEW_TABLES = ["quote_lines", "recovery_reports"]
+NEW_TABLES = ["quote_lines", "recovery_reports", "wipe_reports"]
 
 
 def _pending_upgrades(conn):

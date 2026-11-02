@@ -26,7 +26,7 @@ jobs:
         shell: pwsh
         run: |
           if ("${{ github.ref_type }}" -eq "tag") { $v = "${{ github.ref_name }}".TrimStart("v") }
-          else { $v = "1.1.1" }
+          else { $v = "1.2.0" }
           "version=$v" >> $env:GITHUB_OUTPUT
 
       - name: Test
